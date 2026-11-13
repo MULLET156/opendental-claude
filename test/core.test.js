@@ -148,3 +148,15 @@ test("reports: parameters are validated, never pasted raw", () => {
   assert.match(buildReport("writeoffs_by_provider", { from: "2026-01-01", to: "2026-01-31", basis: "payment" }), /cp\.DateCP BETWEEN/);
   assert.match(buildReport("procedure_counts", { from: "2026-01-01", to: "2026-01-31", codes: "D2740, D6058" }), /IN \('D2740','D6058'\)/);
 });
+
+test("pacing follows the Open Dental plan for the cloud, none for local", () => {
+  const cloud = (o) => createClient({ ...KEYS, ...o }).minIntervalMs;
+  assert.equal(cloud({}), 1000);
+  assert.equal(cloud({ plan: "read-all" }), 5000);
+  assert.equal(cloud({ plan: "Enterprise" }), 500);
+  assert.equal(cloud({ plan: "standard", minIntervalMs: 1500 }), 1500);
+  assert.equal(cloud({ minIntervalMs: "" }), 1000);
+  assert.equal(createClient({ ...KEYS, baseUrl: "http://192.168.1.5:30223/api/v1", plan: "read-all" }).minIntervalMs, 0);
+  assert.throws(() => cloud({ plan: "gold" }), /Unknown Open Dental API plan/);
+  assert.throws(() => cloud({ minIntervalMs: -1 }), /between 0 and 60000/);
+});

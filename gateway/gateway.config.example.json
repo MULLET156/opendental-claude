@@ -3,6 +3,7 @@
   "auditLogDir": "logs",
   "maxRows": 1000,
   "corsOrigins": [],
+  "openDental": { "plan": "standard" },
   "apps": [
     {
       "name": "lab-case-tracker",

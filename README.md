@@ -23,12 +23,33 @@ All three share one core (`core/`), so the safety rules are the same everywhere.
 - "Month-to-date production by provider, net of adjustments and write-offs." / "Collections last week."
 - With changes allowed: "Move Mrs. Patel's Thursday cleaning to 2:00 in Op 2 and log that she called."
 
+## Which Open Dental API plan do I need?
+
+Open Dental sells API access in permission tiers, per location ([pricing and permissions](https://www.opendental.com/site/apipermissions.html); prices may change). Pick the tier that covers what you want to do:
+
+| You want to… | Open Dental permission | Lowest tier |
+|---|---|---|
+| Read the schedule, open slots, patients, commlogs, providers, operatories | Read All | Free (cloud: 1 request / 5 s) |
+| Run reports: production, collections, A/R aging, claims, recall, treatment plans | Queries | $15/mo |
+| Confirm or break appointments, add appointment notes, log calls (commlogs), recall status | Comm | $15/mo |
+| Upload documents/images; simple insurance updates; setup tables | Documents, InsuranceSimple, Setup | $15/mo |
+| Book or move appointments | Appointments | $30/mo |
+| Add or edit patients; post procedures; claims and insurance plans | Patients, ProcedureLogs, Insurance | $30/mo |
+| Take payments; payment plans | Payments, PayPlans | $35/mo |
+| Faster cloud access (1 request / 0.5 s, bigger pages) | Enterprise (special) | Contact Open Dental |
+
+The **Claude connector** uses Read All, Queries, Comm and Appointments. The **app gateway** can reach every Open Dental endpoint your key's tier allows, limited by each app's allow list.
+
+Tell the connector and gateway which plan you're on (`read-all`, `standard` or `enterprise`) so they pace cloud requests to match. Local API and API Service requests aren't throttled, so this only matters for the cloud URL.
+
+> **Important:** Open Dental's own user permissions and date locks **do not** restrict changes made through the API. Whatever your key's tier allows is limited only by the connector's "Allow changes" switch and each gateway app's allow list. Keep write access narrow, especially Payments, Insurance and ProcedureLogs.
+
 ## Quick start
 
 ### 1. Get Open Dental API keys
 
 1. Email **vendor.relations@opendental.com** for Developer Portal access (a practice can register as its own developer). You receive a **Developer Key**.
-2. In the Developer Portal, create a **Customer Key** for the office. Grant only what you'll use: read patients, appointments, providers, operatories, commlogs, and **Queries** (for reports). Add write permissions only if you'll allow changes.
+2. In the Developer Portal, create a **Customer Key** for the office with only the permissions you'll use (see the table above).
 3. In Open Dental: **Setup > Advanced Setup > API**, add the Customer Key and check **Enabled**.
 
 The API is a paid Open Dental add-on, billed per location. See [Open Dental's API setup guide](https://www.opendental.com/site/apisetup.html).
@@ -38,7 +59,7 @@ The API is a paid Open Dental add-on, billed per location. See [Open Dental's AP
 | Mode | API URL | Use when |
 |---|---|---|
 | **API Service** (recommended in the office) | `http://<Open Dental server IP>:30223/api/v1` | The computer running Claude or the gateway is on the office network. Fast, not throttled. |
-| Cloud | `https://api.opendental.com/api/v1` | Working from outside the office. Needs the eConnector running. Open Dental throttles to about 1 request/second (1 per 5 s for read-all-only keys); the connector paces itself. |
+| Cloud | `https://api.opendental.com/api/v1` | Working from outside the office. Needs the eConnector running. Open Dental throttles by plan (see above); the connector paces itself. |
 | Local API | `http://localhost:30222/api/v1` | Open Dental itself is open and logged in on the same computer. |
 
 If the API Service URL doesn't connect, check the service is running in Open Dental (**Tools > Misc Tools > Service Manager**) and that the server's firewall allows port 30223 from your office network. It's plain http, so keep it on your LAN.
@@ -47,7 +68,7 @@ If the API Service URL doesn't connect, check the service is running in Open Den
 
 Download **opendental.mcpb** and **opendental.plugin** from the [latest release](https://github.com/MULLET156/opendental-claude/releases/latest).
 
-1. Open **opendental.mcpb** on the computer running Claude desktop (or drag it into **Settings > Extensions**) and click **Install**. Enter the Developer Key, Customer Key and API URL. Keys are stored in your system keychain. Leave **Allow changes** off until you've tried it.
+1. Open **opendental.mcpb** on the computer running Claude desktop (or drag it into **Settings > Extensions**) and click **Install**. Enter the Developer Key, Customer Key, API URL and (for the cloud URL) your API plan. Keys are stored in your system keychain. Leave **Allow changes** off until you've tried it.
 2. Install **opendental.plugin** in Claude. If you use plugin marketplaces, you can instead add this repo as one: `MULLET156/opendental-claude`.
 3. Ask Claude: **"Check my Open Dental connection."**
 
@@ -105,7 +126,7 @@ docs/          gateway guide, HIPAA and security notes
 ## Develop
 
 ```bash
-npm test         # 18 tests, no install needed (Node 20+)
+npm test         # no install needed (Node 20+)
 npm run build    # writes dist/opendental.mcpb and dist/opendental.plugin
 ```
 
@@ -113,7 +134,7 @@ Contributions welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Please report sec
 
 ## Status
 
-Version 0.3. Built from Open Dental's published API documentation and tested against a simulated Open Dental server; first runs against real offices are underway. Please open an issue if an endpoint behaves differently on your version of Open Dental. Known items to confirm:
+Version 0.3.1. Built from Open Dental's published API documentation and tested against a simulated Open Dental server; first runs against real offices are underway. Please open an issue if an endpoint behaves differently on your version of Open Dental. Known items to confirm:
 
 - Request field names for appointment **Break** (`sendToUnscheduledList`) and **Confirm** (`confirmVal`).
 - Report totals vs. Open Dental's built-in Daily P&I and Aging reports (write-off dating follows your Report Setup).

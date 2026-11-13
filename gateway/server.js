@@ -51,6 +51,8 @@ function main() {
       developerKey: process.env.OD_DEVELOPER_KEY,
       customerKey: process.env.OD_CUSTOMER_KEY,
       maxRows: config.maxRows,
+      plan: process.env.OD_API_PLAN || config.openDental.plan,
+      minIntervalMs: process.env.OD_MIN_INTERVAL_MS ?? config.openDental.minIntervalMs,
     });
   } catch (e) {
     console.error(`Open Dental settings problem: ${e.message}`);
@@ -71,7 +73,7 @@ function main() {
   server.listen(config.listen.port, config.listen.host, () => {
     const scheme = config.tls ? "https" : "http";
     console.log(`Open Dental gateway v${version} listening on ${scheme}://${config.listen.host}:${config.listen.port}`);
-    console.log(`Open Dental: ${od.baseUrl} (${od.isCloud ? "cloud, paced ~1 req/s" : "local network"})`);
+    console.log(`Open Dental: ${od.baseUrl} (${od.isCloud ? `cloud, one request every ${od.minIntervalMs / 1000} s` : "local network, not throttled"})`);
     console.log(`Apps: ${config.apps.map((a) => a.name + (a.disabled ? " (disabled)" : "")).join(", ")}`);
     if (!config.tls && !["127.0.0.1", "localhost", "::1"].includes(config.listen.host)) {
       console.log("Note: serving plain http on the network. Keep this on your office LAN or put it behind HTTPS.");

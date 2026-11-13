@@ -9,7 +9,7 @@ The gateway is a small web service that sits between **your apps** and **Open De
                                               └ writes audit log
 ```
 
-It's a single Node.js process with no dependencies (Node 20 or newer).
+It's a single Node.js process with no dependencies (Node 20 or newer). It can reach every Open Dental API endpoint your Customer Key's permissions allow; see the plan table in the [README](../README.md#which-open-dental-api-plan-do-i-need).
 
 ## Where to run it
 
@@ -68,6 +68,7 @@ node gateway/server.js
   "maxRows": 1000,
   "maxBodyBytes": 1048576,
   "corsOrigins": [],
+  "openDental": { "plan": "standard", "minIntervalMs": null },
   "apps": [
     {
       "name": "lab-case-tracker",
@@ -81,6 +82,7 @@ node gateway/server.js
       "redact": ["SSN"],
       "rateLimitPerMinute": 120,
       "maxRows": 500,
+      "maxBodyBytes": 1048576,
       "disabled": false
     }
   ]
@@ -94,13 +96,19 @@ node gateway/server.js
 | `trustProxy` | Use `X-Forwarded-For` for the audit log's IP (only behind your own proxy). |
 | `auditLogDir` | Folder for daily `audit-YYYY-MM-DD.jsonl` files. `null` turns logging off (not recommended). |
 | `maxRows` | Ceiling on rows per response for every app. |
+| `openDental.plan` | Your Open Dental API plan: `read-all` (1 request / 5 s), `standard` (1 / s) or `enterprise` (1 / 0.5 s). Paces cloud requests so Open Dental doesn't refuse them; ignored for the API Service and Local API. Env `OD_API_PLAN` overrides. |
+| `openDental.minIntervalMs` | Exact spacing between Open Dental requests in milliseconds, overriding the plan (rarely needed). Env `OD_MIN_INTERVAL_MS` overrides. |
+| `maxBodyBytes` | Largest request body any app may send. Default 1 MB. |
 | `corsOrigins` | Browser origins allowed to call the gateway. Leave empty unless you must call it from a browser; a key in browser code can be copied by anyone who uses that page. |
 | `apps[].allow` | Open Dental paths and methods the app may use through `/v1/od/…`. `*` = one path segment, `**` = anything below. Methods: GET, POST, PUT, DELETE. |
 | `apps[].reports` | Built-in report names the app may run, or `["*"]`. |
 | `apps[].rawSql` | Allow `POST /v1/query` (read-only SQL). Off by default. |
 | `apps[].redact` | Extra fields to remove from everything this app receives (SSN-type fields are always removed). |
+| `apps[].maxBodyBytes` | Larger body limit for this app, e.g. `15728640` (15 MB) for an app that uploads documents. Open Dental's document upload sends the file as base64, which is about a third larger than the file. Up to 100 MB. |
 | `apps[].rateLimitPerMinute` | Per-app request limit. Default 120. |
 | `apps[].disabled` | Turn an app off without deleting it. |
+
+Each app's allow list is the real control over what it can change: **Open Dental's own user permissions and date locks don't apply to API changes.** Grant writes to Payments, Insurance, ProcedureLogs and Patients only to apps that need them.
 
 Change the config, then restart the gateway. To revoke a key, delete or disable the app; to rotate, run `new-key` again and replace the hash.
 

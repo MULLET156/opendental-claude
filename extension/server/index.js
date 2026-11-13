@@ -36,6 +36,7 @@ try {
     developerKey: setting("OD_DEVELOPER_KEY"),
     customerKey: setting("OD_CUSTOMER_KEY"),
     maxRows: Number(setting("OD_MAX_ROWS", "500")),
+    plan: setting("OD_API_PLAN", "standard"),
   });
 } catch (e) {
   // Keep running so Claude can report the problem instead of a dead connector.

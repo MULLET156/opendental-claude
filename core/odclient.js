@@ -17,6 +17,23 @@
 
 const CLOUD_URL = "https://api.opendental.com/api/v1";
 
+/**
+ * Open Dental throttles cloud (Remote) requests per customer key by API plan.
+ * Local API and API Service requests are not throttled.
+ *   read-all    Read All permission only: 1 request / 5 s
+ *   standard    any paid permission: 1 request / s
+ *   enterprise  Enterprise permission: 1 request / 500 ms
+ */
+const PLAN_INTERVAL_MS = { "read-all": 5000, standard: 1000, enterprise: 500 };
+
+function planInterval(plan) {
+  const p = String(plan || "standard").trim().toLowerCase();
+  if (!Object.prototype.hasOwnProperty.call(PLAN_INTERVAL_MS, p)) {
+    throw new ODError(`Unknown Open Dental API plan "${plan}". Use one of: ${Object.keys(PLAN_INTERVAL_MS).join(", ")}.`, { code: "config" });
+  }
+  return PLAN_INTERVAL_MS[p];
+}
+
 const DEFAULT_REDACT = ["SSN", "ssn", "PatientSSN", "DriverLicense", "DriversLicense"];
 
 class ODError extends Error {
@@ -180,7 +197,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * @param {number} [opts.maxRows=500]   Hard cap on rows any paged call returns.
  * @param {number} [opts.timeoutMs=60000]
  * @param {number} [opts.maxResponseBytes=20MB]
- * @param {number} [opts.minIntervalMs] Spacing between requests. Default 1000 for the cloud API, 0 otherwise.
+ * @param {string} [opts.plan]          Open Dental API plan for cloud pacing: read-all | standard | enterprise.
+ * @param {number} [opts.minIntervalMs] Spacing between requests; overrides plan. Default: plan pacing for the cloud API, 0 otherwise.
  * @param {number} [opts.maxRetries=3]  Retries on 429/502/503/504.
  * @param {number} [opts.maxRetryWaitMs=30000]
  * @param {Function} [opts.fetch]       Injected fetch for tests.
@@ -193,7 +211,13 @@ function createClient(opts = {}) {
   const timeoutMs = opts.timeoutMs || 60000;
   const maxResponseBytes = opts.maxResponseBytes || 20 * 1024 * 1024;
   const isCloud = new URL(baseUrl).hostname === "api.opendental.com";
-  const minIntervalMs = opts.minIntervalMs ?? (isCloud ? 1000 : 0);
+  const planMs = planInterval(opts.plan);
+  let minIntervalMs = opts.minIntervalMs;
+  if (minIntervalMs === undefined || minIntervalMs === null || minIntervalMs === "") minIntervalMs = isCloud ? planMs : 0;
+  minIntervalMs = Number(minIntervalMs);
+  if (!Number.isFinite(minIntervalMs) || minIntervalMs < 0 || minIntervalMs > 60000) {
+    throw new ODError("Request spacing must be between 0 and 60000 milliseconds.", { code: "config" });
+  }
   const maxRetries = opts.maxRetries ?? 3;
   const maxRetryWaitMs = opts.maxRetryWaitMs ?? 30000;
   const fetchImpl = opts.fetch || globalThis.fetch;
@@ -334,11 +358,12 @@ function createClient(opts = {}) {
     return getAll("/queries/ShortQuery", {}, { limit, method: "PUT", body: { SqlCommand: safe } });
   }
 
-  return { baseUrl, isCloud, maxRows, request, getAll, shortQuery };
+  return { baseUrl, isCloud, maxRows, minIntervalMs, request, getAll, shortQuery };
 }
 
 module.exports = {
   CLOUD_URL,
+  PLAN_INTERVAL_MS,
   ODError,
   createClient,
   normalizeBaseUrl,

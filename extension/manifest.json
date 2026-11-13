@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "opendental",
   "display_name": "Open Dental",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Connect Claude to Open Dental: schedule, patients, A/R, claims and production reports. Independent project, not affiliated with Open Dental Software.",
   "long_description": "Reads your Open Dental database through the official Open Dental API (cloud, API Service or Local API). Read-only unless you turn on \"Allow changes\", which lets Claude book, move, confirm or break appointments and add commlog and appointment notes after you approve each one. SSNs are removed from every result, and report queries are limited to read-only SQL.",
   "author": {
@@ -28,7 +28,8 @@
         "OD_DEVELOPER_KEY": "${user_config.developer_key}",
         "OD_CUSTOMER_KEY": "${user_config.customer_key}",
         "OD_ALLOW_WRITES": "${user_config.allow_writes}",
-        "OD_MAX_ROWS": "${user_config.max_rows}"
+        "OD_MAX_ROWS": "${user_config.max_rows}",
+        "OD_API_PLAN": "${user_config.api_plan}"
       }
     }
   },
@@ -127,6 +128,13 @@
       "description": "In the office: http://<server IP>:30223/api/v1 (API Service). Outside the office: https://api.opendental.com/api/v1 (cloud).",
       "default": "https://api.opendental.com/api/v1",
       "required": true
+    },
+    "api_plan": {
+      "type": "string",
+      "title": "Open Dental API plan",
+      "description": "Only matters for the cloud URL; sets how fast Claude may send requests. Enter read-all (free plan, 1 request per 5 s), standard (any paid plan, 1 per second) or enterprise (Enterprise add-on, 1 per 0.5 s).",
+      "default": "standard",
+      "required": false
     },
     "allow_writes": {
       "type": "boolean",

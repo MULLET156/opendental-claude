@@ -75,18 +75,19 @@ function createGateway({ config, od, version = "dev", now = () => Date.now() }) 
     buckets.set(app.name, b);
   }
 
-  function readBody(req) {
+  function readBody(req, app) {
     return new Promise((resolve, reject) => {
       if (req.method === "GET" || req.method === "DELETE") {
         req.resume();
         return resolve(undefined);
       }
       const ct = String(req.headers["content-type"] || "");
-      const tooLarge = () => new HttpError(413, "too_large", "Request body is too large.");
+      const maxBody = (app && app.maxBodyBytes) || config.maxBodyBytes;
+      const tooLarge = () => new HttpError(413, "too_large", `Request body is larger than this app's limit of ${Math.round(maxBody / 1024)} KB.`);
       // Oversized uploads are read and thrown away (up to a cap) before answering,
       // so the client receives the 413 instead of a reset connection. Past the
       // cap, the connection is cut.
-      const drainCap = Math.max(config.maxBodyBytes * 16, 16 * 1024 * 1024);
+      const drainCap = Math.max(maxBody * 4, 16 * 1024 * 1024);
       if (Number(req.headers["content-length"] || 0) > drainCap) {
         const e = tooLarge();
         e.closeConnection = true;
@@ -101,7 +102,7 @@ function createGateway({ config, od, version = "dev", now = () => Date.now() }) 
           if (size > drainCap) req.destroy();
           return;
         }
-        if (size > config.maxBodyBytes) {
+        if (size > maxBody) {
           tooBig = true;
           chunks.length = 0;
         } else chunks.push(c);
@@ -179,7 +180,8 @@ function createGateway({ config, od, version = "dev", now = () => Date.now() }) 
           reports: [...app.reports],
           rawSql: app.rawSql,
           rateLimitPerMinute: app.rateLimitPerMinute,
-          openDental: { mode: od.isCloud ? "cloud" : "local" },
+          maxBodyBytes: app.maxBodyBytes || config.maxBodyBytes,
+          openDental: { mode: od.isCloud ? "cloud" : "local", requestSpacingMs: od.minIntervalMs },
         },
       };
     }
@@ -277,7 +279,7 @@ function createGateway({ config, od, version = "dev", now = () => Date.now() }) 
     try {
       app = authenticate(req);
       rateLimit(app);
-      const body = await readBody(req);
+      const body = await readBody(req, app);
       const out = await route(req, app, url, body, ctx);
       status = out.status;
       send(res, out.status, out.body, { ...cors, ...(out.headers || {}) });

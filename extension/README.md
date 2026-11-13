@@ -6,7 +6,8 @@ Settings (Claude > Settings > Extensions > Open Dental):
 
 - **Developer Key / Customer Key**: from Open Dental's Developer Portal; stored in your system keychain.
 - **API URL**: `http://<Open Dental server IP>:30223/api/v1` in the office (API Service), or `https://api.opendental.com/api/v1` (cloud, needs the eConnector).
-- **Allow changes**: off by default.
+- **Open Dental API plan**: `read-all`, `standard` or `enterprise`; paces cloud requests to your plan.
+- **Allow changes**: off by default. Booking or moving appointments needs Open Dental's Appointments permission; confirming, breaking and notes need Comm; reports need Queries.
 
 Full documentation: https://github.com/MULLET156/opendental-claude
 

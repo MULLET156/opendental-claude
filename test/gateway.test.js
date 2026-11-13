@@ -29,6 +29,7 @@ function config(logDir) {
           { methods: ["POST"], paths: ["/commlogs"] },
         ],
         rateLimitPerMinute: 1000,
+        maxBodyBytes: 2 * 1024 * 1024,
       },
       { name: "dash", keyHash: hashKey(DASH), reports: ["production_by_provider"], redact: ["Email"], rateLimitPerMinute: 4 },
       { name: "sql", keyHash: hashKey(SQL), rawSql: true, reports: ["*"] },
@@ -138,8 +139,13 @@ test("gateway end to end", async (t) => {
     r = await gw.call("GET", "/health", { headers: { Origin: "https://evil.example.com" } });
     assert.equal(r.headers.get("access-control-allow-origin"), null);
 
-    // body size limit
-    assert.equal((await gw.call("POST", "/v1/od/commlogs", { key: LAB, body: { Note: "x".repeat(1100000) } })).status, 413);
+    // body size limit is per app: lab may send 2 MB, sql app keeps the 1 MB default
+    od.state.failNext.length = 0;
+    assert.equal((await gw.call("POST", "/v1/od/commlogs", { key: LAB, body: { Note: "x".repeat(1100000) } })).status, 201);
+    r = await gw.call("POST", "/v1/od/commlogs", { key: LAB, body: { Note: "x".repeat(2200000) } });
+    assert.equal(r.status, 413);
+    assert.match(r.body.error.message, /2048 KB/);
+    assert.equal((await gw.call("POST", "/v1/query", { key: SQL, body: { sql: "SELECT 1", pad: "x".repeat(1100000) } })).status, 413);
 
     // unknown route
     assert.equal((await gw.call("GET", "/v1/nope", { key: LAB })).status, 404);
@@ -173,6 +179,10 @@ test("gateway config validation", () => {
   assert.ok(compilePattern("/appointments/**").test("/appointments/5/Break"));
   assert.ok(!compilePattern("/appointments/**").test("/appointments"));
   assert.ok(compilePattern("/Patients").test("/patients"));
+  assert.throws(() => validateConfig({ openDental: { plan: "gold" }, apps: [ok] }), /openDental.plan/);
+  assert.throws(() => validateConfig({ openDental: { minIntervalMs: -5 }, apps: [ok] }), /minIntervalMs/);
+  assert.throws(() => validateConfig({ apps: [{ ...ok, maxBodyBytes: 10 }] }), /maxBodyBytes/);
+  assert.equal(validateConfig({ openDental: { plan: "enterprise" }, apps: [ok] }).openDental.plan, "enterprise");
   const example = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "gateway", "gateway.config.example.json"), "utf8"));
   assert.equal(validateConfig(example).apps.length, 3);
 });

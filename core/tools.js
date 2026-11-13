@@ -55,7 +55,7 @@ function buildTools(od, { allowWrites = false } = {}) {
         const provs = await od.request("GET", "/providers");
         return out({
           base_url: od.baseUrl,
-          mode: od.isCloud ? "cloud (paced at about 1 request/second)" : "local network",
+          mode: od.isCloud ? `cloud (one request every ${od.minIntervalMs / 1000} s)` : "local network (not throttled)",
           writes_enabled: allowWrites,
           providers_visible: Array.isArray(provs) ? provs.length : null,
         });

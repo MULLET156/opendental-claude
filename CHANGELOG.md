@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1 — 2026-11-13
+
+- **API plan setting** (`read-all`, `standard`, `enterprise`) for the connector and gateway, so cloud requests are paced to your Open Dental plan (1 per 5 s, 1 per s, 1 per 0.5 s). Gateway also accepts an exact `minIntervalMs`.
+- **Per-app upload limit** in the gateway (`apps[].maxBodyBytes`), for apps that upload documents.
+- Gateway answers oversized uploads with 413 instead of resetting the connection (fixes Windows clients).
+- Docs: which Open Dental API plan you need for each feature, and a warning that Open Dental's user permissions don't restrict API changes.
+
 ## 0.3.0 — 2026-11-13
 
 First public release.

@@ -67,12 +67,23 @@ function validateConfig(raw, { requireApps = true } = {}) {
     maxRows: Number(raw.maxRows || 1000),
     maxBodyBytes: Number(raw.maxBodyBytes || 1024 * 1024),
     corsOrigins: Array.isArray(raw.corsOrigins) ? raw.corsOrigins : [],
+    openDental: { plan: "standard", minIntervalMs: null, ...(raw.openDental || {}) },
     apps: [],
   };
   if (!Number.isInteger(cfg.listen.port) || cfg.listen.port < 1 || cfg.listen.port > 65535) {
     throw new ConfigError("listen.port must be a port number.");
   }
   if (cfg.tls && (!cfg.tls.certFile || !cfg.tls.keyFile)) throw new ConfigError("tls needs certFile and keyFile.");
+  if (!["read-all", "standard", "enterprise"].includes(String(cfg.openDental.plan).toLowerCase())) {
+    throw new ConfigError('openDental.plan must be "read-all", "standard" or "enterprise".');
+  }
+  const mi = cfg.openDental.minIntervalMs;
+  if (mi !== null && mi !== undefined && !(Number.isFinite(Number(mi)) && mi >= 0 && mi <= 60000)) {
+    throw new ConfigError("openDental.minIntervalMs must be between 0 and 60000.");
+  }
+  if (!Number.isFinite(cfg.maxBodyBytes) || cfg.maxBodyBytes < 1024 || cfg.maxBodyBytes > 100 * 1024 * 1024) {
+    throw new ConfigError("maxBodyBytes must be between 1024 and 104857600 (100 MB).");
+  }
   for (const o of cfg.corsOrigins) {
     if (typeof o !== "string" || !/^https?:\/\/[^/]+$/.test(o)) throw new ConfigError(`corsOrigins entry "${o}" must look like https://app.example.com`);
   }
@@ -118,7 +129,12 @@ function validateConfig(raw, { requireApps = true } = {}) {
       redact: Array.isArray(a.redact) ? a.redact.map(String) : [],
       rateLimitPerMinute: Number(a.rateLimitPerMinute || 120),
       maxRows: a.maxRows ? Number(a.maxRows) : null,
+      maxBodyBytes: a.maxBodyBytes ? Number(a.maxBodyBytes) : null,
     });
+    const last = cfg.apps[cfg.apps.length - 1];
+    if (last.maxBodyBytes !== null && (!Number.isFinite(last.maxBodyBytes) || last.maxBodyBytes < 1024 || last.maxBodyBytes > 100 * 1024 * 1024)) {
+      throw new ConfigError(`${where}.maxBodyBytes must be between 1024 and 104857600 (100 MB).`);
+    }
   }
   return cfg;
 }

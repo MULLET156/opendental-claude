@@ -82,24 +82,32 @@ function createGateway({ config, od, version = "dev", now = () => Date.now() }) 
         return resolve(undefined);
       }
       const ct = String(req.headers["content-type"] || "");
-      if (Number(req.headers["content-length"] || 0) > config.maxBodyBytes) {
-        return reject(new HttpError(413, "too_large", "Request body is too large."));
+      const tooLarge = () => new HttpError(413, "too_large", "Request body is too large.");
+      // Oversized uploads are read and thrown away (up to a cap) before answering,
+      // so the client receives the 413 instead of a reset connection. Past the
+      // cap, the connection is cut.
+      const drainCap = Math.max(config.maxBodyBytes * 16, 16 * 1024 * 1024);
+      if (Number(req.headers["content-length"] || 0) > drainCap) {
+        const e = tooLarge();
+        e.closeConnection = true;
+        return reject(e);
       }
       const chunks = [];
       let size = 0;
       let tooBig = false;
       req.on("data", (c) => {
-        if (tooBig) return;
         size += c.length;
+        if (tooBig) {
+          if (size > drainCap) req.destroy();
+          return;
+        }
         if (size > config.maxBodyBytes) {
           tooBig = true;
           chunks.length = 0;
-          req.pause();
-          reject(new HttpError(413, "too_large", "Request body is too large."));
         } else chunks.push(c);
       });
       req.on("end", () => {
-        if (tooBig) return;
+        if (tooBig) return reject(tooLarge());
         const text = Buffer.concat(chunks).toString("utf8");
         if (!text.trim()) return resolve(undefined);
         if (!/application\/json/i.test(ct)) return reject(new HttpError(415, "bad_input", "Send the body as application/json."));
@@ -287,8 +295,8 @@ function createGateway({ config, od, version = "dev", now = () => Date.now() }) 
       } else {
         console.error("[gateway]", e && e.stack);
       }
-      if (status === 413) {
-        // Don't read the rest of an oversized upload; close once the answer is sent.
+      if (e && e.closeConnection) {
+        // Far too large to read: answer, then close without reading the rest.
         send(res, status, { error: { code, message } }, { ...cors, Connection: "close" });
         res.on("finish", () => req.destroy());
       } else {

@@ -1,5 +1,9 @@
 name: Release
+# Builds dist/opendental.mcpb and dist/opendental.plugin and publishes them as a
+# GitHub release named after the version in package.json.
+# Run it from the Actions tab ("Run workflow"), or push a tag like v0.3.0.
 on:
+  workflow_dispatch:
   push:
     tags: ["v*"]
 permissions:
@@ -14,14 +18,22 @@ jobs:
           node-version: 22
       - run: npm test
       - run: npm run build
-      - name: Check tag matches version
-        run: test "v$(node -p "require('./package.json').version")" = "${GITHUB_REF_NAME}"
+      - name: Work out the tag
+        id: tag
+        run: |
+          TAG="v$(node -p "require('./package.json').version")"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "$TAG" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match package.json version ($TAG)"; exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" dist/opendental.mcpb dist/opendental.plugin --clobber
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/opendental.mcpb dist/opendental.plugin --clobber
           else
-            gh release create "$GITHUB_REF_NAME" dist/opendental.mcpb dist/opendental.plugin --title "$GITHUB_REF_NAME" --notes-file CHANGELOG.md
+            gh release create "$TAG" dist/opendental.mcpb dist/opendental.plugin \
+              --target "$GITHUB_SHA" --title "$TAG" --notes-file CHANGELOG.md
           fi

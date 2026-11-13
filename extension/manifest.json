@@ -1,0 +1,164 @@
+{
+  "manifest_version": "0.3",
+  "name": "opendental",
+  "display_name": "Open Dental",
+  "version": "0.3.0",
+  "description": "Connect Claude to Open Dental: schedule, patients, A/R, claims and production reports. Independent project, not affiliated with Open Dental Software.",
+  "long_description": "Reads your Open Dental database through the official Open Dental API (cloud, API Service or Local API). Read-only unless you turn on \"Allow changes\", which lets Claude book, move, confirm or break appointments and add commlog and appointment notes after you approve each one. SSNs are removed from every result, and report queries are limited to read-only SQL.",
+  "author": {
+    "name": "Ryan Millet"
+  },
+  "keywords": [
+    "open dental",
+    "dental",
+    "practice management",
+    "scheduling",
+    "production"
+  ],
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/server/index.js"
+      ],
+      "env": {
+        "OD_BASE_URL": "${user_config.base_url}",
+        "OD_DEVELOPER_KEY": "${user_config.developer_key}",
+        "OD_CUSTOMER_KEY": "${user_config.customer_key}",
+        "OD_ALLOW_WRITES": "${user_config.allow_writes}",
+        "OD_MAX_ROWS": "${user_config.max_rows}"
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "od_connection_check",
+      "description": "Test the connection and show settings"
+    },
+    {
+      "name": "od_list_providers",
+      "description": "List providers"
+    },
+    {
+      "name": "od_list_operatories",
+      "description": "List operatories (chairs)"
+    },
+    {
+      "name": "od_search_patients",
+      "description": "Search patients"
+    },
+    {
+      "name": "od_get_patient",
+      "description": "Get one patient's record"
+    },
+    {
+      "name": "od_get_appointments",
+      "description": "List appointments by date or patient"
+    },
+    {
+      "name": "od_find_open_slots",
+      "description": "Find open schedule slots"
+    },
+    {
+      "name": "od_get_asap_list",
+      "description": "List the ASAP list"
+    },
+    {
+      "name": "od_get_commlogs",
+      "description": "Get a patient's commlogs"
+    },
+    {
+      "name": "od_list_reports",
+      "description": "List built-in reports"
+    },
+    {
+      "name": "od_run_report",
+      "description": "Run a built-in report"
+    },
+    {
+      "name": "od_run_query",
+      "description": "Run a read-only report query"
+    },
+    {
+      "name": "od_add_commlog",
+      "description": "Add a commlog (needs Allow changes)"
+    },
+    {
+      "name": "od_create_appointment",
+      "description": "Book an appointment (needs Allow changes)"
+    },
+    {
+      "name": "od_reschedule_appointment",
+      "description": "Move an appointment (needs Allow changes)"
+    },
+    {
+      "name": "od_add_appointment_note",
+      "description": "Add to an appointment note (needs Allow changes)"
+    },
+    {
+      "name": "od_confirm_appointment",
+      "description": "Set confirmation status (needs Allow changes)"
+    },
+    {
+      "name": "od_break_appointment",
+      "description": "Break an appointment (needs Allow changes)"
+    }
+  ],
+  "user_config": {
+    "developer_key": {
+      "type": "string",
+      "title": "Developer Key",
+      "description": "From the Open Dental Developer Portal.",
+      "sensitive": true,
+      "required": true
+    },
+    "customer_key": {
+      "type": "string",
+      "title": "Customer Key",
+      "description": "Your office's key, also entered in Open Dental under Setup > Advanced Setup > API.",
+      "sensitive": true,
+      "required": true
+    },
+    "base_url": {
+      "type": "string",
+      "title": "API URL",
+      "description": "In the office: http://<server IP>:30223/api/v1 (API Service). Outside the office: https://api.opendental.com/api/v1 (cloud).",
+      "default": "https://api.opendental.com/api/v1",
+      "required": true
+    },
+    "allow_writes": {
+      "type": "boolean",
+      "title": "Allow changes",
+      "description": "Let Claude book, move, confirm or break appointments and add notes. Claude asks before each change.",
+      "default": false,
+      "required": false
+    },
+    "max_rows": {
+      "type": "number",
+      "title": "Max rows per request",
+      "description": "Upper limit on rows returned by one tool call.",
+      "default": 500,
+      "min": 50,
+      "max": 5000,
+      "required": false
+    }
+  },
+  "compatibility": {
+    "platforms": [
+      "darwin",
+      "win32"
+    ],
+    "runtimes": {
+      "node": ">=18.0.0"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MULLET156/opendental-claude"
+  },
+  "homepage": "https://github.com/MULLET156/opendental-claude",
+  "support": "https://github.com/MULLET156/opendental-claude/issues",
+  "license": "MIT"
+}

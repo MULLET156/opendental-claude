@@ -1,0 +1,12 @@
+{
+  "name": "opendental-claude",
+  "owner": { "name": "Ryan Millet" },
+  "metadata": { "description": "Open Dental tools for Claude." },
+  "plugins": [
+    {
+      "name": "opendental",
+      "source": "./plugin",
+      "description": "Skills for running a dental office from Claude with Open Dental. Install the Open Dental connector (opendental.mcpb) as well."
+    }
+  ]
+}

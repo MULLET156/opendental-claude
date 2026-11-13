@@ -1,2 +1,127 @@
-# opendental-claude
-Connection between Opendental and Claude.
+# Open Dental × Claude
+
+Connect [Open Dental](https://www.opendental.com/) to Claude, and to the apps you build, through Open Dental's official API.
+
+| Part | What it is | Who it's for |
+|---|---|---|
+| **Claude connector** (`opendental.mcpb`) | A Claude desktop extension. Ask Claude about the schedule, patients, A/R, claims and production; optionally let it book, move or confirm appointments after you approve each change. | Dentists, office managers |
+| **Claude skills** (`opendental` plugin) | Teaches Claude how a dental office works with Open Dental: day sheets, open slots, aging buckets, net production, recall. | Anyone using the connector |
+| **App gateway** (`gateway/`) | A small web service your own apps call to read from and write to Open Dental, with a separate key and permissions for each app, built-in reports, and an audit log. | Practices and developers building their own tools |
+
+All three share one core (`core/`), so the safety rules are the same everywhere. There are **no dependencies** to install; everything runs on plain Node.js, and Claude desktop supplies its own copy for the connector.
+
+> Independent, community project. Not affiliated with or endorsed by Open Dental Software, Inc. "Open Dental" is their trademark.
+
+---
+
+## What you can ask Claude
+
+- "What's on Dr. Lee's schedule tomorrow? Who's unconfirmed?"
+- "Find a 60-minute opening next week in Op 3." / "Who's on the ASAP list?"
+- "Pull up Jane Smith, born 1976-05-24. When is she due for recall? What's treatment-planned?"
+- "A/R aging totals." / "Who owes over $500 past 90 days?" / "Outstanding claims over 30 days by carrier."
+- "Month-to-date production by provider, net of adjustments and write-offs." / "Collections last week."
+- With changes allowed: "Move Mrs. Patel's Thursday cleaning to 2:00 in Op 2 and log that she called."
+
+## Quick start
+
+### 1. Get Open Dental API keys
+
+1. Email **vendor.relations@opendental.com** for Developer Portal access (a practice can register as its own developer). You receive a **Developer Key**.
+2. In the Developer Portal, create a **Customer Key** for the office. Grant only what you'll use: read patients, appointments, providers, operatories, commlogs, and **Queries** (for reports). Add write permissions only if you'll allow changes.
+3. In Open Dental: **Setup > Advanced Setup > API**, add the Customer Key and check **Enabled**.
+
+The API is a paid Open Dental add-on, billed per location. See [Open Dental's API setup guide](https://www.opendental.com/site/apisetup.html).
+
+### 2. Pick how to reach Open Dental
+
+| Mode | API URL | Use when |
+|---|---|---|
+| **API Service** (recommended in the office) | `http://<Open Dental server IP>:30223/api/v1` | The computer running Claude or the gateway is on the office network. Fast, not throttled. |
+| Cloud | `https://api.opendental.com/api/v1` | Working from outside the office. Needs the eConnector running. Open Dental throttles to about 1 request/second (1 per 5 s for read-all-only keys); the connector paces itself. |
+| Local API | `http://localhost:30222/api/v1` | Open Dental itself is open and logged in on the same computer. |
+
+If the API Service URL doesn't connect, check the service is running in Open Dental (**Tools > Misc Tools > Service Manager**) and that the server's firewall allows port 30223 from your office network. It's plain http, so keep it on your LAN.
+
+### 3. Install the Claude connector and skills
+
+Download **opendental.mcpb** and **opendental.plugin** from the [latest release](https://github.com/MULLET156/opendental-claude/releases/latest).
+
+1. Open **opendental.mcpb** on the computer running Claude desktop (or drag it into **Settings > Extensions**) and click **Install**. Enter the Developer Key, Customer Key and API URL. Keys are stored in your system keychain. Leave **Allow changes** off until you've tried it.
+2. Install **opendental.plugin** in Claude. If you use plugin marketplaces, you can instead add this repo as one: `MULLET156/opendental-claude`.
+3. Ask Claude: **"Check my Open Dental connection."**
+
+To try everything without real patient data, use the cloud URL with the public test keys on Open Dental's API setup page.
+
+### 4. (Optional) Run the app gateway
+
+See **[docs/gateway.md](docs/gateway.md)**. In short:
+
+```bash
+git clone https://github.com/MULLET156/opendental-claude.git
+cd opendental-claude
+cp gateway/gateway.config.example.json gateway.config.json
+cp gateway/.env.example .env           # fill in your Open Dental keys
+node gateway/cli.js new-key "my-app"   # prints an app key + config entry
+node gateway/server.js                 # starts on http://127.0.0.1:8787
+```
+
+Then from your app's server:
+
+```bash
+curl -H "Authorization: Bearer odg_..." \
+  "http://127.0.0.1:8787/v1/od/appointments?date=2026-11-13"
+curl -H "Authorization: Bearer odg_..." \
+  "http://127.0.0.1:8787/v1/reports/production_by_provider?from=2026-11-01&to=2026-11-30"
+```
+
+---
+
+## Safety design
+
+- **Read-only unless you say otherwise.** Claude's change tools refuse to run until "Allow changes" is on, and they're marked so Claude asks before each one. Gateway apps can only call the Open Dental paths and methods listed for them.
+- **No free-form SQL by default.** Reports are a fixed catalog with type-checked parameters. Custom SQL (Claude's `od_run_query`, or gateway apps with `rawSql`) must pass a read-only check, and Open Dental's own query endpoint also screens and audit-logs it.
+- **SSNs never leave the connector or gateway**; they're removed at every depth. Gateway apps can remove more fields (emails, phones, addresses).
+- **Keys stay put.** Open Dental keys live in your keychain (connector) or server environment (gateway), are only ever sent to the configured Open Dental URL, and redirects are never followed. Gateway app keys are stored only as hashes.
+- **Audit log.** The gateway writes one line per request: app, method, path (record numbers masked), status, row count, timing. No patient data, query values or bodies.
+- **Polite to Open Dental.** Cloud requests are paced and `Retry-After` is honored with a bounded retry budget.
+
+## HIPAA
+
+These tools move protected health information. Read **[docs/hipaa-and-security.md](docs/hipaa-and-security.md)** before using real patient data. The short version: have a BAA with every service PHI passes through (including your Claude plan), run the gateway on your office network or a host that signs a BAA, and grant each key and app only what it needs. This is not legal advice.
+
+## Repository layout
+
+```
+core/          shared Open Dental client, safety checks, report catalog, Claude tools, MCP protocol
+extension/     Claude desktop extension (manifest + entry point)
+plugin/        Claude plugin: skills for schedule, patients, billing, production
+gateway/       app gateway server, config, CLI
+scripts/       build.js: packs dist/opendental.mcpb and dist/opendental.plugin (no dependencies)
+test/          node:test suite with a fake Open Dental server
+docs/          gateway guide, HIPAA and security notes
+```
+
+## Develop
+
+```bash
+npm test         # 18 tests, no install needed (Node 20+)
+npm run build    # writes dist/opendental.mcpb and dist/opendental.plugin
+```
+
+Contributions welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Please report security issues privately as described in [SECURITY.md](SECURITY.md).
+
+## Status
+
+Version 0.3. Built from Open Dental's published API documentation and tested against a simulated Open Dental server; first runs against real offices are underway. Please open an issue if an endpoint behaves differently on your version of Open Dental. Known items to confirm:
+
+- Request field names for appointment **Break** (`sendToUnscheduledList`) and **Confirm** (`confirmVal`).
+- Report totals vs. Open Dental's built-in Daily P&I and Aging reports (write-off dating follows your Report Setup).
+
+## Credits
+
+Thanks to [sanjibani/open-dental-mcp](https://github.com/sanjibani/open-dental-mcp) and [MaxilloCA/open-dental-mcp](https://github.com/MaxilloCA/open-dental-mcp), whose Python MCP servers for Open Dental informed several safety checks here (no redirects, strict record IDs, bounded retries, sanitized errors).
+
+## License
+
+[MIT](LICENSE) © 2026 Ryan Millet

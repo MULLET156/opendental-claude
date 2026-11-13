@@ -1,0 +1,20 @@
+{
+  "name": "opendental-claude",
+  "version": "0.3.0",
+  "description": "Connect Open Dental to Claude (desktop extension + skills) and to your own apps (API gateway). No dependencies.",
+  "license": "MIT",
+  "author": "Ryan Millet",
+  "homepage": "https://github.com/MULLET156/opendental-claude",
+  "repository": { "type": "git", "url": "https://github.com/MULLET156/opendental-claude.git" },
+  "bugs": "https://github.com/MULLET156/opendental-claude/issues",
+  "private": true,
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "node --test",
+    "build": "node scripts/build.js",
+    "gateway": "node gateway/server.js",
+    "gateway:key": "node gateway/cli.js new-key",
+    "gateway:check": "node gateway/cli.js check"
+  },
+  "keywords": ["open dental", "opendental", "dental", "mcp", "claude", "practice management"]
+}

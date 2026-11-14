@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.2 — 2026-11-14
+
+- **Windows setup reads `settings.txt`:** fill in the keys and lab sync settings in Notepad before running `Setup.cmd`, and Setup uses them instead of asking. The only stop left is pasting a new shared secret into the tracker's `config.php`, and none if `SHARED_SECRET` is filled in. Values are checked: a key with a label or punctuation, an unknown lab number or a bad date makes Setup say why and ask instead. Once saved securely, the keys and secret are blanked out of `settings.txt`, and a copy without them is kept in `C:\OpenDentalGateway` for next time. On later runs, `SYNC_START_DATE=today` keeps the start date already saved.
+
 ## 0.8.1 — 2026-11-14
 
 - **Windows setup:** each Open Dental key is entered in a small pop-up window, where Ctrl+V and right-click → Paste work normally and a **Show** box lets you check it. Paste in PowerShell's hidden prompt didn't work in some windows. The console prompt remains as a fallback.

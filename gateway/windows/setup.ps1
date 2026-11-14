@@ -224,6 +224,49 @@ function Write-EnvFile([string]$file, [hashtable]$map) {
   [IO.File]::WriteAllText($file, (($lines -join "`r`n") + "`r`n"), (New-Object Text.UTF8Encoding $false))
 }
 
+# ---------------------------------------------------------------- settings.txt
+
+$SettingNames = @("DEVELOPER_KEY", "CUSTOMER_KEY", "OPEN_DENTAL_ADDRESS", "API_PLAN", "LAB_SYNC", "LAB_TRACKER_ADDRESS", "IN_HOUSE_LABS", "SYNC_START_DATE", "PATIENT_FORMAT", "SHARED_SECRET", "SEND_TEST")
+
+# Reads NAME=value lines (comments start with #). Returns only the values filled in.
+function Read-Settings([string]$file) {
+  $map = @{}
+  if (-not $file -or -not (Test-Path $file)) { return $map }
+  foreach ($line in [IO.File]::ReadAllLines($file)) {
+    $l = $line.TrimStart([char]0xFEFF).Trim()
+    if (-not $l -or $l.StartsWith("#")) { continue }
+    if ($l -notmatch '^([A-Za-z_]+)\s*=\s*(.*)$') { Warn "settings.txt: ignoring a line that isn't NAME=value"; continue }
+    $name = $Matches[1].ToUpper()
+    $value = $Matches[2].Trim().Trim([char[]]@([char]34, [char]39))
+    if ($SettingNames -notcontains $name) { Warn "settings.txt: '$name' isn't a setting Setup knows; check the spelling"; continue }
+    if ($value) { $map[$name] = $value }
+  }
+  return $map
+}
+
+# Blanks the named values in settings.txt (keys and secret, once saved securely).
+function Scrub-Settings([string]$file, [string[]]$names) {
+  if (-not $file -or -not (Test-Path $file)) { return }
+  $lines = [IO.File]::ReadAllLines($file)
+  $changed = $false
+  for ($i = 0; $i -lt $lines.Length; $i++) {
+    foreach ($n in $names) {
+      if ($lines[$i] -match "^\s*$n\s*=\s*\S") { $lines[$i] = "$n="; $changed = $true }
+    }
+  }
+  if ($changed) {
+    try {
+      [IO.File]::WriteAllText($file, (($lines -join "`r`n") + "`r`n"), (New-Object Text.UTF8Encoding $false))
+      Good "Removed $($names -join ', ') from settings.txt (now saved securely)"
+    } catch {
+      Warn "Couldn't blank the keys in $file. Delete that file or remove the keys from it yourself."
+    }
+  }
+}
+
+function Is-Yes([string]$v) { return ($v -match '^\s*(y|yes|true|1|on)\s*$') }
+function Is-No([string]$v) { return ($v -match '^\s*(n|no|false|0|off)\s*$') }
+
 # Runs node with the given arguments and returns its exit code, output and errors.
 # (Start-Process keeps Windows PowerShell from turning Node's error output into exceptions.)
 function Run-Node([string[]]$argList) {
@@ -268,6 +311,9 @@ $Config   = Join-Path $DataDir "gateway.config.json"
 $EnvFile  = Join-Path $DataDir ".env"
 $script:Node = Join-Path $script:NodeDir "node.exe"
 $Source   = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
+# settings.txt sits next to Setup.cmd (in the download or the install folder), or next to this script.
+$SettingsFile = @((Join-Path (Split-Path $Source -Parent) "settings.txt"), (Join-Path $PSScriptRoot "settings.txt")) |
+  Where-Object { Test-Path $_ } | Select-Object -First 1
 
 Write-Host ""
 Write-Host "  Open Dental Gateway setup" -ForegroundColor White
@@ -358,15 +404,43 @@ try {
   # ------------------------------------------------------------ 3. Open Dental keys
 
   Step "3/5  Open Dental connection"
+  $st = Read-Settings $SettingsFile
+  $auto = [bool]($st['DEVELOPER_KEY'] -or $st['CUSTOMER_KEY'] -or $st['LAB_SYNC'] -or $st['LAB_TRACKER_ADDRESS'] -or $st['SHARED_SECRET'])
+  if ($auto) { Good "Using the answers in $SettingsFile" }
   $envMap = Read-EnvFile $EnvFile
   $current = Helper @("get", $Config)
   $keepAll = $false
-  if ($envMap['OD_DEVELOPER_KEY'] -and $current.exists) {
+  if (-not $auto -and $envMap['OD_DEVELOPER_KEY'] -and $current.exists) {
     $keepAll = AskYes "Keep all current settings and just update/restart?" $true
   }
 
-  $askKeys = -not $envMap['OD_DEVELOPER_KEY']
-  if (-not $keepAll -and -not $askKeys) { $askKeys = -not (AskYes "Keep the saved Open Dental keys and address ($($envMap['OD_BASE_URL']))?" $true) }
+  $keysFromFile = $false
+  if ($auto) {
+    $askKeys = $false
+    $addr = if ($st['OPEN_DENTAL_ADDRESS']) { $st['OPEN_DENTAL_ADDRESS'] } elseif ($envMap['OD_BASE_URL']) { $envMap['OD_BASE_URL'] } else { "http://127.0.0.1:30223/api/v1" }
+    $envMap['OD_BASE_URL'] = $addr
+    if ($addr -match 'api\.opendental\.com') {
+      $envMap['OD_API_PLAN'] = if ($st['API_PLAN']) { $st['API_PLAN'] } elseif ($envMap['OD_API_PLAN']) { $envMap['OD_API_PLAN'] } else { "standard" }
+    } else { $envMap.Remove('OD_API_PLAN') }
+    Good "Open Dental address: $addr"
+    foreach ($pair in @(@("DEVELOPER_KEY", "OD_DEVELOPER_KEY", "Developer Key"), @("CUSTOMER_KEY", "OD_CUSTOMER_KEY", "Customer Key"))) {
+      $fv = $st[$pair[0]]
+      if ($fv) {
+        $c = Clean-Key $fv
+        if ($c -match '^[A-Za-z0-9_-]{4,128}$') { $envMap[$pair[1]] = $c; $keysFromFile = $true; Good "$($pair[2]) read from settings.txt" }
+        else {
+          Warn "$($pair[0]) in settings.txt doesn't look like an Open Dental key: it has $(Describe-Key $fv)."
+          $envMap[$pair[1]] = AskKey $pair[2]
+        }
+      } elseif (-not $envMap[$pair[1]]) {
+        $envMap[$pair[1]] = AskKey $pair[2]
+      } else { Good "$($pair[2]): keeping the one saved before" }
+    }
+    Write-EnvFile $EnvFile $envMap
+  } else {
+    $askKeys = -not $envMap['OD_DEVELOPER_KEY']
+    if (-not $keepAll -and -not $askKeys) { $askKeys = -not (AskYes "Keep the saved Open Dental keys and address ($($envMap['OD_BASE_URL']))?" $true) }
+  }
 
   while ($true) {
     if ($askKeys) {
@@ -390,6 +464,8 @@ try {
     if (-not (AskYes "Enter the address and keys again?" $true)) { throw "Open Dental connection failed." }
     $askKeys = $true
   }
+  # The keys are saved in data\.env now; don't leave them in settings.txt.
+  Scrub-Settings $SettingsFile @("DEVELOPER_KEY", "CUSTOMER_KEY")
 
   # ------------------------------------------------------------ 4. lab tracker sync
 
@@ -397,9 +473,19 @@ try {
   $ls = $current.labSync
   $syncOn = $false
   $writeEnv = @{}
+  $sendTest = $true
   if ($keepAll) {
     $syncOn = [bool]($ls -and $ls.enabled)
     Good $(if ($syncOn) { "Keeping the lab sync settings ($($ls.trackerUrl))" } else { "Lab sync stays off" })
+  } elseif ($auto -and (Is-Yes $st['LAB_SYNC'])) {
+    $syncOn = $true
+  } elseif ($auto -and (Is-No $st['LAB_SYNC'])) {
+    $syncOn = $false
+    Good "Lab sync off (settings.txt)"
+  } elseif ($auto -and -not $st['LAB_SYNC'] -and $st['LAB_TRACKER_ADDRESS']) {
+    $syncOn = $true
+  } elseif ($auto -and -not $st['LAB_SYNC'] -and $ls -and $ls.enabled) {
+    $syncOn = $true
   } else {
     Say "   Sends new Open Dental lab cases to a web lab tracker (patient as 'J. Smith' only)"
     Say "   and writes 'ready' (and 'sent' for outside labs) back. See docs\lab-tracker-sync.md."
@@ -407,34 +493,92 @@ try {
   }
 
   if ($syncOn -and -not $keepAll) {
-    while ($true) {
-      $url = Ask "Tracker sync address (ends in /od-sync.php)" $(if ($ls) { $ls.trackerUrl } else { "https://" })
-      if ($url -match '^https://[^/\s]+/.*od-sync\.php$') { break }
-      Warn "It should look like https://lab.example.com/od-sync.php"
+    # Tracker address
+    $url = if ($auto -and $st['LAB_TRACKER_ADDRESS']) { $st['LAB_TRACKER_ADDRESS'] } elseif ($auto -and $ls -and $ls.trackerUrl) { $ls.trackerUrl } else { "" }
+    if ($url -and $url -notmatch '^https://[^/\s]+/.*od-sync\.php$') {
+      Warn "LAB_TRACKER_ADDRESS should look like https://lab.example.com/od-sync.php"
+      $url = ""
+    }
+    if ($url) { Good "Tracker: $url" }
+    while (-not $url) {
+      $url = Ask "Tracker sync address (ends in /od-sync.php)" $(if ($ls -and $ls.trackerUrl) { $ls.trackerUrl } else { "https://" })
+      if ($url -notmatch '^https://[^/\s]+/.*od-sync\.php$') { Warn "It should look like https://lab.example.com/od-sync.php"; $url = "" }
     }
 
+    # In-house labs
     $labs = Helper @("labs", $Config)
+    $labNums = @()
     if ($labs.ok -and $labs.labs) {
       Say "   Labs in Open Dental:"
-      foreach ($l in $labs.labs) { Say ("     {0,4}  {1}" -f $l.num, $l.name) }
+      foreach ($l in $labs.labs) { Say ("     {0,4}  {1}" -f $l.num, $l.name); $labNums += [string]$l.num }
     } else { Warn "Couldn't list labs: $($labs.error)" }
-    $inHouse = Ask "Number(s) of your in-house lab(s), separated by commas (blank if none)" $(if ($ls) { $ls.inHouseLabs } else { "" })
-
-    $today = (Get-Date).ToString("yyyy-MM-dd")
-    Say "   Only lab cases created on or after the start date are sent (so old cases don't flood the tracker)."
-    while ($true) {
-      $from = Ask "Start date (yyyy-MM-dd)" $(if ($ls -and $ls.syncFrom) { $ls.syncFrom } else { $today })
-      $d = [datetime]::MinValue
-      if ([datetime]::TryParseExact($from, "yyyy-MM-dd", $null, [Globalization.DateTimeStyles]::None, [ref]$d)) { break }
-      Warn "Use the form 2026-11-16."
+    $inHouse = $null
+    if ($auto -and $st['IN_HOUSE_LABS']) {
+      $inHouse = if ($st['IN_HOUSE_LABS'] -match '^\s*none\s*$') { "" } else { (($st['IN_HOUSE_LABS'] -split '[\s,]+') | Where-Object { $_ }) -join "," }
+      $unknown = @(($inHouse -split ',') | Where-Object { $_ -and $labNums.Count -and ($labNums -notcontains $_) })
+      if ($inHouse -and ($inHouse -notmatch '^\d+(,\d+)*$')) { Warn "IN_HOUSE_LABS should be numbers from the list above, or none."; $inHouse = $null }
+      elseif ($unknown.Count) { Warn "IN_HOUSE_LABS has $($unknown -join ', '), which isn't in the list above."; $inHouse = $null }
+    } elseif ($auto -and $ls) {
+      $inHouse = [string]$ls.inHouseLabs
+    }
+    if ($null -eq $inHouse) {
+      $inHouse = Ask "Number(s) of your in-house lab(s), separated by commas (blank if none)" $(if ($ls) { $ls.inHouseLabs } else { "" })
+    } else {
+      Good $(if ($inHouse) { "In-house lab(s): $inHouse" } else { "In-house labs: none" })
     }
 
-    Say "   How patients appear in the tracker:  1 = J. Smith    2 = J.S."
-    $fmtDefault = if ($ls -and $ls.patientFormat -eq "initials") { "2" } else { "1" }
-    $fmt = if ((Ask "Choose 1 or 2" $fmtDefault) -eq "2") { "initials" } else { "initial-last" }
+    # Start date
+    $today = (Get-Date).ToString("yyyy-MM-dd")
+    $from = $null
+    if ($auto) {
+      $sd = $st['SYNC_START_DATE']
+      if ($sd -and $sd -notmatch '^\s*today\s*$') { $from = $sd.Trim() }
+      elseif ($ls -and $ls.syncFrom) { $from = $ls.syncFrom }
+      else { $from = $today }
+      $d = [datetime]::MinValue
+      if (-not [datetime]::TryParseExact($from, "yyyy-MM-dd", $null, [Globalization.DateTimeStyles]::None, [ref]$d)) { Warn "SYNC_START_DATE should look like 2026-11-16 (or today)."; $from = $null }
+      else { Good "Cases created on or after $from are sent" }
+    }
+    if (-not $from) {
+      Say "   Only lab cases created on or after the start date are sent (so old cases don't flood the tracker)."
+      while ($true) {
+        $from = Ask "Start date (yyyy-MM-dd)" $(if ($ls -and $ls.syncFrom) { $ls.syncFrom } else { $today })
+        $d = [datetime]::MinValue
+        if ([datetime]::TryParseExact($from, "yyyy-MM-dd", $null, [Globalization.DateTimeStyles]::None, [ref]$d)) { break }
+        Warn "Use the form 2026-11-16."
+      }
+    }
 
-    $newSecret = -not $envMap['LAB_SYNC_SECRET']
-    if (-not $newSecret) { $newSecret = AskYes "Make a new shared secret? (No keeps the one already in the tracker)" $false }
+    # Patient format
+    $fmt = $null
+    if ($auto) {
+      $pf = [string]$st['PATIENT_FORMAT']
+      if ($pf -match '^\s*(J\.?\s*S\.?|initials)\s*$') { $fmt = "initials" }
+      elseif ($pf -match '^\s*(J\.?\s+Smith|initial-last)\s*$') { $fmt = "initial-last" }
+      elseif (-not $pf) { $fmt = if ($ls -and $ls.patientFormat) { $ls.patientFormat } else { "initial-last" } }
+      else { Warn "PATIENT_FORMAT should be J. Smith or J.S." }
+      if ($fmt) { Good $(if ($fmt -eq "initials") { "Patients shown as J.S." } else { "Patients shown as J. Smith" }) }
+    }
+    if (-not $fmt) {
+      Say "   How patients appear in the tracker:  1 = J. Smith    2 = J.S."
+      $fmtDefault = if ($ls -and $ls.patientFormat -eq "initials") { "2" } else { "1" }
+      $fmt = if ((Ask "Choose 1 or 2" $fmtDefault) -eq "2") { "initials" } else { "initial-last" }
+    }
+
+    # Shared secret
+    $newSecret = $false
+    $fileSecret = if ($auto -and $st['SHARED_SECRET']) { Clean-Key $st['SHARED_SECRET'] } else { "" }
+    if ($fileSecret -and $fileSecret -match '^[A-Za-z0-9_-]{32,}$') {
+      $envMap['LAB_SYNC_SECRET'] = $fileSecret
+      Write-EnvFile $EnvFile $envMap
+      Good "Shared secret read from settings.txt (it must match OD_SYNC_SECRET in the tracker's config.php)"
+      Scrub-Settings $SettingsFile @("SHARED_SECRET")
+    } else {
+      if ($fileSecret) { Warn "SHARED_SECRET in settings.txt is too short (at least 32 letters and numbers); ignoring it." }
+      if (-not $envMap['LAB_SYNC_SECRET']) { $newSecret = $true }
+      elseif ($auto) { Good "Keeping the shared secret saved before" }
+      else { $newSecret = AskYes "Make a new shared secret? (No keeps the one already in the tracker)" $false }
+    }
     if ($newSecret) {
       $s = Helper @("secret")
       $envMap['LAB_SYNC_SECRET'] = $s.secret
@@ -452,6 +596,7 @@ try {
       Read-Host "   Press Enter once config.php is saved"
     }
 
+    if ($auto -and (Is-No $st['SEND_TEST'])) { $sendTest = $false }
     $writeEnv = @{ SETUP_LABSYNC = "1"; SETUP_TRACKER_URL = $url; SETUP_IN_HOUSE = $inHouse; SETUP_SYNC_FROM = $from; SETUP_PATIENT_FORMAT = $fmt }
   } elseif (-not $syncOn) {
     $writeEnv = @{ SETUP_LABSYNC = "0" }
@@ -469,7 +614,8 @@ try {
     if ($preview.code -ne 0) { Warn $preview.err; Warn "The preview failed; fix the problem above and run Setup again." }
     else {
       Say (Indent $preview.out) "DarkGray"
-      if (AskYes "Send to the tracker now and check it works?" $true) {
+      $doSend = if ($auto) { $sendTest } else { AskYes "Send to the tracker now and check it works?" $true }
+      if ($doSend) {
       $run = Run-Node @($CliJs, "lab-sync", $Config)
       if ($run.code -eq 0) {
         Good "The tracker answered. Result:"
@@ -512,10 +658,22 @@ try {
     if ($tail) { Say (Indent $tail) "DarkGray" }
   }
 
+  # Keep a copy of the answers (without keys) next to the installed Setup.cmd for next time.
+  $installedSettings = Join-Path $InstallDir "settings.txt"
+  if ($SettingsFile -and ([IO.Path]::GetFullPath($SettingsFile) -ine $installedSettings)) {
+    $leftover = Read-Settings $SettingsFile
+    if (-not ($leftover['DEVELOPER_KEY'] -or $leftover['CUSTOMER_KEY'] -or $leftover['SHARED_SECRET'])) {
+      Copy-Item -Force $SettingsFile $installedSettings
+    }
+  } elseif (-not $SettingsFile -and -not (Test-Path $installedSettings)) {
+    $template = Join-Path $AppDir "gateway\windows\settings.txt"
+    if (Test-Path $template) { Copy-Item -Force $template $installedSettings }
+  }
+
   Write-Host ""
   Write-Host "  Done." -ForegroundColor Green
   Say "  Log:              $LogDir\gateway.log"
-  Say "  Change settings:  run $InstallDir\Setup.cmd again"
+  Say "  Change settings:  edit $InstallDir\settings.txt if you like, then run $InstallDir\Setup.cmd"
   Say "  Remove:           powershell -ExecutionPolicy Bypass -File `"$AppDir\gateway\windows\setup.ps1`" -Uninstall"
 } catch {
   Write-Host ""

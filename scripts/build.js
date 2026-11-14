@@ -142,14 +142,19 @@ const WINDOWS_README = `Open Dental Gateway for Windows
 ==============================
 
 1. Extract this whole zip (right-click > Extract All).
-2. Double-click Setup.cmd and answer the questions. Windows asks for administrator
-   permission; if it shows "Windows protected your PC", click More info > Run anyway.
+2. Optional but easiest: open settings.txt in Notepad, fill in your Open Dental
+   keys (and the lab tracker settings if you use it), and save. Setup then uses
+   those answers instead of asking, and blanks the keys out of the file once
+   they're saved securely.
+3. Double-click Setup.cmd. Windows asks for administrator permission; if it shows
+   "Windows protected your PC", click More info > Run anyway.
 
 Setup downloads Node.js (checked against nodejs.org's checksums) into the install
-folder (C:\\OpenDentalGateway), asks for your Open Dental keys and tests them, can set
-up the lab tracker sync, and starts the gateway in the background with Windows.
-Run C:\\OpenDentalGateway\\Setup.cmd again to change settings. To update, download the
-newer zip and run its Setup.cmd; your keys and settings are kept.
+folder (C:\\OpenDentalGateway), tests your Open Dental keys, can set up the lab
+tracker sync, and starts the gateway in the background with Windows.
+To change settings later, edit C:\\OpenDentalGateway\\settings.txt and run
+C:\\OpenDentalGateway\\Setup.cmd. To update, download the newer zip and run its
+Setup.cmd; your keys and settings are kept.
 
 Guide: https://github.com/MULLET156/opendental-claude/blob/main/docs/install-gateway-windows.md
 `;
@@ -165,12 +170,13 @@ function buildGatewayWindows() {
   const entries = [
     { name: "Setup.cmd", data: crlf(read("gateway/windows/Setup.cmd")) },
     { name: "README.txt", data: crlf(Buffer.from(WINDOWS_README)) },
+    { name: "settings.txt", data: crlf(read("gateway/windows/settings.txt")) },
     { name: "app/package.json", data: read("package.json") },
     { name: "app/LICENSE", data: read("LICENSE") },
     ...walk(path.join(ROOT, "core")).map((e) => ({ name: `app/core/${e.name}`, data: e.data })),
     ...walk(path.join(ROOT, "gateway"))
       .filter((e) => !/(^|\/)\.env$|^gateway\.config\.json$|^logs\//.test(e.name))
-      .map((e) => ({ name: `app/gateway/${e.name}`, data: /\.(ps1|cmd)$/.test(e.name) ? crlf(e.data) : e.data })),
+      .map((e) => ({ name: `app/gateway/${e.name}`, data: /\.(ps1|cmd|txt)$/.test(e.name) ? crlf(e.data) : e.data })),
   ];
   return { data: zip(entries), names: entries.map((e) => e.name) };
 }

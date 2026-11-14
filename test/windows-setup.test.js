@@ -106,8 +106,14 @@ test(".env and config files saved by Notepad with a byte-order mark still load",
 
 test("Windows download has Setup.cmd at the top and the gateway under app/", () => {
   const names = buildGatewayWindows().names;
-  for (const n of ["Setup.cmd", "README.txt", "app/package.json", "app/LICENSE", "app/core/odclient.js", "app/core/reports.js", "app/gateway/server.js", "app/gateway/lab-sync.js", "app/gateway/windows/setup.ps1", "app/gateway/windows/setup-helper.js", "app/gateway/windows/Setup.cmd"]) {
+  for (const n of ["Setup.cmd", "README.txt", "settings.txt", "app/package.json", "app/LICENSE", "app/core/odclient.js", "app/core/reports.js", "app/gateway/server.js", "app/gateway/lab-sync.js", "app/gateway/windows/setup.ps1", "app/gateway/windows/setup-helper.js", "app/gateway/windows/Setup.cmd"]) {
     assert.ok(names.includes(n), n);
   }
   assert.ok(!names.some((n) => /(^|\/)\.env$|gateway\.config\.json$|node_modules/.test(n)));
+});
+
+test("settings.txt template has no values for keys or the secret", () => {
+  const text = fs.readFileSync(path.join(__dirname, "..", "gateway", "windows", "settings.txt"), "utf8");
+  for (const k of ["DEVELOPER_KEY", "CUSTOMER_KEY", "SHARED_SECRET", "LAB_TRACKER_ADDRESS", "LAB_SYNC"]) assert.match(text, new RegExp(`^${k}=$`, "m"), k);
+  assert.match(text, /^OPEN_DENTAL_ADDRESS=http:\/\/127\.0\.0\.1:30223\/api\/v1$/m);
 });

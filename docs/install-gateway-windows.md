@@ -10,18 +10,31 @@ You need:
 
 ## Easy way: Setup (about 10 minutes)
 
-1. Download **opendental-gateway-windows-&lt;version&gt;.zip** (for example `opendental-gateway-windows-0.8.0.zip`) from the [latest release](https://github.com/MULLET156/opendental-claude/releases/latest) onto the office server. Setup shows the version it installs.
+1. Download **opendental-gateway-windows-&lt;version&gt;.zip** (for example `opendental-gateway-windows-0.8.2.zip`) from the [latest release](https://github.com/MULLET156/opendental-claude/releases/latest) onto the office server. Setup shows the version it installs.
 2. Right-click it → **Extract All**.
-3. In the extracted folder, double-click **Setup.cmd**.
+3. **Fill in `settings.txt`** (optional, but then Setup asks almost nothing). Open it in Notepad from the extracted folder, paste your values after the `=` signs and save:
+
+   ```
+   DEVELOPER_KEY=your developer key
+   CUSTOMER_KEY=your customer key
+   OPEN_DENTAL_ADDRESS=http://127.0.0.1:30223/api/v1
+   LAB_SYNC=yes
+   LAB_TRACKER_ADDRESS=https://your-tracker-site/od-sync.php
+   IN_HOUSE_LABS=1
+   SYNC_START_DATE=today
+   PATIENT_FORMAT=J. Smith
+   ```
+
+   Every setting is explained in the file. Leave something blank and Setup asks for it (for example, leave `IN_HOUSE_LABS` blank and Setup lists your labs). Once your keys are saved securely, Setup **blanks them out of `settings.txt`**, so they don't sit in a text file.
+4. In the extracted folder, double-click **Setup.cmd**.
    - If Windows shows **"Windows protected your PC"**, click **More info → Run anyway** (the script isn't code-signed).
    - Click **Yes** when Windows asks for administrator permission.
-4. Answer the questions:
-   - **API address**: press Enter for the default on the Open Dental server.
-   - **Developer Key** and **Customer Key**: a small window opens for each. Paste the key (Ctrl+V or right-click → Paste), tick **Show** if you want to check it, and click **OK**. Setup tests them right away.
-   - **Lab tracker sync**: answer **y**, then the tracker address, your in-house lab number(s) (Setup lists your labs), the start date and how patients appear (J. Smith or J.S.).
-   - Setup shows a line like `define('OD_SYNC_SECRET', '…');` and copies it to the clipboard. Paste it into the tracker's `config.php` on your web host, save, then press Enter.
-   - It shows a **preview** of what would be sent (nothing is sent yet), then offers to send once to check the tracker answers.
-5. Setup starts the gateway and sets it to start with Windows. You're done.
+5. Setup tests the keys, then for the lab sync:
+   - Shows a line like `define('OD_SYNC_SECRET', '…');` and copies it to the clipboard. Paste it into the tracker's `config.php` on your web host, save, then press Enter. (If the tracker already has a secret, put it in `SHARED_SECRET=` in `settings.txt` and Setup skips this.)
+   - Shows a **preview** of what would be sent, then sends once to check the tracker answers (`SEND_TEST=no` skips that).
+6. Setup starts the gateway and sets it to start with Windows. You're done.
+
+Without `settings.txt`, Setup asks each question instead: the API address, then a small window for each key (paste with Ctrl+V or right-click → Paste; tick **Show** to check it), then the lab sync questions.
 
 What Setup does:
 
@@ -31,8 +44,8 @@ What Setup does:
 
 Later:
 
-- **Change settings:** double-click `C:\OpenDentalGateway\Setup.cmd`.
-- **Update:** download the newer zip, extract it and run its `Setup.cmd`; answer **Y** to "Keep all current settings".
+- **Change settings:** edit `C:\OpenDentalGateway\settings.txt` (Setup keeps a copy there, without the keys) and double-click `C:\OpenDentalGateway\Setup.cmd`. Blank key lines mean "keep the saved keys".
+- **Update:** download the newer zip, extract it and run its `Setup.cmd`. With a filled-in `settings.txt` it reuses your answers; otherwise answer **Y** to "Keep all current settings".
 - **Logs:** `C:\OpenDentalGateway\data\logs\gateway.log`, plus `audit-<date>.jsonl` (counts only, no patient data).
 - **Remove:** in an admin PowerShell, `powershell -ExecutionPolicy Bypass -File C:\OpenDentalGateway\app\gateway\windows\setup.ps1 -Uninstall`.
 

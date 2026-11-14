@@ -52,7 +52,12 @@ Tell the connector and gateway which plan you're on (`read-all`, `standard` or `
 2. In the Developer Portal, create a **Customer Key** for the office with only the permissions you'll use (see the table above).
 3. In Open Dental: **Setup > Advanced Setup > API**, add the Customer Key and check **Enabled**.
 
-The API is a paid Open Dental add-on, billed per location. See [Open Dental's API setup guide](https://www.opendental.com/site/apisetup.html).
+The API is a paid Open Dental add-on, billed per location. Open Dental's own guides:
+
+- [API Setup](https://www.opendental.com/site/apisetup.html): getting Developer Portal access, creating and enabling keys, the public test database
+- [API Permissions](https://www.opendental.com/site/apipermissions.html): what each permission allows, and pricing tiers
+- [API Modes: Local, Service and Remote](https://www.opendental.com/site/apilocal.html): installing and running the API Service
+- [API Specification](https://www.opendental.com/site/apispecification.html): every endpoint, for building your own apps through the gateway
 
 ### 2. Pick how to reach Open Dental
 
@@ -64,7 +69,7 @@ The API is a paid Open Dental add-on, billed per location. See [Open Dental's AP
 
 #### Set up the API Service (in the office, one time)
 
-Do these on the **Open Dental server** (the computer that hosts the database), logged into Open Dental as an administrator. The API Service needs eConnector version 22.2.16 or later and internet access (it checks your keys with Open Dental every few hours).
+Do these on the **Open Dental server** (the computer that hosts the database), logged into Open Dental as an administrator. The API Service needs eConnector version 22.2.16 or later and internet access (it checks your keys with Open Dental every few hours). Open Dental's full instructions, including the manual install for versions 22.2.41 and earlier, are on their [API Modes page](https://www.opendental.com/site/apilocal.html).
 
 1. **Turn on the API:** **Setup > Advanced Setup > API**. Make sure your Customer Key is listed and **API Enabled** is checked.
 2. **Check the API Service is running:** **Tools > Misc Tools > Service Manager** should list **OpenDentalAPIService** as Started. Open Dental normally installs it automatically once the API is enabled. If it's missing, click **Add**, name it `OpenDentalAPIService`, choose `OpenDentalAPIService.exe`, click **Install**, enter your database connection details, click **OK**, then **Start**.

@@ -33,11 +33,11 @@ function dateParams(start, end) {
  * @param {ReturnType<import('./odclient').createClient>} od
  * @param {{allowWrites: boolean}} opts
  */
-function buildTools(od, { allowWrites = false } = {}) {
+function buildTools(od, { allowWrites = false, allowChartChanges = false } = {}) {
   const needWrites = () => {
     if (!allowWrites) {
       throw new ODError(
-        'Changes are turned off for this connection. Turn on "Allow changes" in the Open Dental extension settings to book, move or confirm appointments and add notes.',
+        'Changes are turned off for this connection. Turn on "Allow schedule changes" in the Open Dental extension settings to book, move or confirm appointments and add notes.',
         { code: "forbidden" }
       );
     }
@@ -57,6 +57,7 @@ function buildTools(od, { allowWrites = false } = {}) {
           base_url: od.baseUrl,
           mode: od.isCloud ? `cloud (one request every ${od.minIntervalMs / 1000} s)` : "local network (not throttled)",
           writes_enabled: allowWrites,
+          chart_changes_enabled: allowChartChanges,
           providers_visible: Array.isArray(provs) ? provs.length : null,
         });
       },

@@ -2,8 +2,8 @@
   "manifest_version": "0.3",
   "name": "opendental",
   "display_name": "Open Dental",
-  "version": "0.3.1",
-  "description": "Connect Claude to Open Dental: schedule, patients, A/R, claims and production reports. Independent project, not affiliated with Open Dental Software.",
+  "version": "0.4.0",
+  "description": "Connect Claude to Open Dental: schedule, patients, chart notes, treatment planning, A/R, claims and production reports. Independent project, not affiliated with Open Dental Software.",
   "long_description": "Reads your Open Dental database through the official Open Dental API (cloud, API Service or Local API). Read-only unless you turn on \"Allow changes\", which lets Claude book, move, confirm or break appointments and add commlog and appointment notes after you approve each one. SSNs are removed from every result, and report queries are limited to read-only SQL.",
   "author": {
     "name": "Ryan Millet"
@@ -29,7 +29,8 @@
         "OD_CUSTOMER_KEY": "${user_config.customer_key}",
         "OD_ALLOW_WRITES": "${user_config.allow_writes}",
         "OD_MAX_ROWS": "${user_config.max_rows}",
-        "OD_API_PLAN": "${user_config.api_plan}"
+        "OD_API_PLAN": "${user_config.api_plan}",
+        "OD_ALLOW_CHART_CHANGES": "${user_config.allow_chart_changes}"
       }
     }
   },
@@ -105,6 +106,66 @@
     {
       "name": "od_break_appointment",
       "description": "Break an appointment (needs Allow changes)"
+    },
+    {
+      "name": "od_get_progress_notes",
+      "description": "Read chart progress notes"
+    },
+    {
+      "name": "od_get_procedures",
+      "description": "List a patient's procedures"
+    },
+    {
+      "name": "od_get_procedure_notes",
+      "description": "Read procedure notes"
+    },
+    {
+      "name": "od_get_medical_summary",
+      "description": "Read medical summary"
+    },
+    {
+      "name": "od_get_treatment_plans",
+      "description": "List treatment plans"
+    },
+    {
+      "name": "od_lookup_procedure_code",
+      "description": "Look up procedure codes"
+    },
+    {
+      "name": "od_list_treatment_priorities",
+      "description": "List priorities and diagnoses"
+    },
+    {
+      "name": "od_add_group_note",
+      "description": "Write a visit group note (needs Allow chart changes)"
+    },
+    {
+      "name": "od_append_procedure_note",
+      "description": "Add to a procedure note (needs Allow chart changes)"
+    },
+    {
+      "name": "od_plan_procedure",
+      "description": "Treatment-plan a procedure (needs Allow chart changes)"
+    },
+    {
+      "name": "od_update_planned_procedure",
+      "description": "Change a planned procedure (needs Allow chart changes)"
+    },
+    {
+      "name": "od_remove_planned_procedure",
+      "description": "Remove a planned procedure (needs Allow chart changes)"
+    },
+    {
+      "name": "od_create_treatment_plan",
+      "description": "Create a treatment plan (needs Allow chart changes)"
+    },
+    {
+      "name": "od_add_to_treatment_plan",
+      "description": "Group procedures into a plan (needs Allow chart changes)"
+    },
+    {
+      "name": "od_update_treatment_plan",
+      "description": "Rename a treatment plan (needs Allow chart changes)"
     }
   ],
   "user_config": {
@@ -138,8 +199,15 @@
     },
     "allow_writes": {
       "type": "boolean",
-      "title": "Allow changes",
-      "description": "Let Claude book, move, confirm or break appointments and add notes. Claude asks before each change.",
+      "title": "Allow schedule changes",
+      "description": "Let Claude book, move, confirm or break appointments and add commlog/appointment notes. Claude asks before each change.",
+      "default": false,
+      "required": false
+    },
+    "allow_chart_changes": {
+      "type": "boolean",
+      "title": "Allow chart changes",
+      "description": "Let Claude write clinical notes (unsigned group notes and addenda) and enter treatment-planned procedures and treatment plans. Claude asks before each change and never signs.",
       "default": false,
       "required": false
     },

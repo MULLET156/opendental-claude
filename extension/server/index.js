@@ -17,6 +17,7 @@ function load(mod) {
 }
 const { createClient } = load("odclient");
 const { buildTools } = load("tools");
+const { buildClinicalTools } = load("clinical-tools");
 const { createMcpHandler, serveStdio } = load("mcp-stdio");
 const { version } = require("../manifest.json");
 
@@ -44,8 +45,9 @@ try {
   od = createClient({});
 }
 const allowWrites = setting("OD_ALLOW_WRITES", "false").toLowerCase() === "true";
+const allowChartChanges = setting("OD_ALLOW_CHART_CHANGES", "false").toLowerCase() === "true";
 
-let tools = buildTools(od, { allowWrites });
+let tools = [...buildTools(od, { allowWrites, allowChartChanges }), ...buildClinicalTools(od, { allowChartChanges })];
 if (configError) {
   tools = tools.map((t) => ({ ...t, run: async () => { throw configError; } }));
 }
@@ -56,8 +58,8 @@ const handler = createMcpHandler({
   tools,
   log,
   instructions:
-    "Open Dental practice data. Resolve providers and operatories to numbers first. Never guess between patients with similar names. Prefer od_run_report over custom SQL. Before any CHANGE tool, state the exact change and wait for the user's yes.",
+    "Open Dental practice data. Resolve providers and operatories to numbers first. Never guess between patients with similar names. Prefer od_run_report over custom SQL. Before any CHANGE or CHART CHANGE tool, state the exact change and wait for the user's yes. Never diagnose or choose treatment; record what the dentist decides. Never sign notes or plans.",
 });
 
 serveStdio(handler, { log });
-log(`started v${version}; ${od.baseUrl}; changes ${allowWrites ? "allowed" : "off"}${configError ? "; CONFIG ERROR: " + configError.message : ""}`);
+log(`started v${version}; ${od.baseUrl}; schedule changes ${allowWrites ? "allowed" : "off"}; chart changes ${allowChartChanges ? "allowed" : "off"}${configError ? "; CONFIG ERROR: " + configError.message : ""}`);

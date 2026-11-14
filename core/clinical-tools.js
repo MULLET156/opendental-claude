@@ -1,0 +1,527 @@
+"use strict";
+/**
+ * Clinical tools: chart notes and treatment planning.
+ *
+ * Reading is always available. Every change requires the separate
+ * "Allow chart changes" setting, and is marked so Claude asks first.
+ *
+ * Safety rules built in:
+ *  - Claude never signs anything. Notes are written unsigned; the dentist signs in Open Dental.
+ *  - Notes are only ever added to (appended), never overwritten. Open Dental keeps
+ *    every earlier version in the Chart's Audit tab.
+ *  - Group notes only cover completed procedures that belong to the named patient.
+ *  - Only treatment-planned (TP) procedures can be changed or removed.
+ *  - Treatment-plan changes are checked against the named patient.
+ */
+
+const { ODError, redact, checkDate, recordId } = require("./odclient");
+
+const READ = { readOnlyHint: true, openWorldHint: true };
+const WRITE = { readOnlyHint: false, destructiveHint: false, openWorldHint: true };
+const WRITE_DESTRUCTIVE = { readOnlyHint: false, destructiveHint: true, openWorldHint: true };
+
+const str = (description) => ({ type: "string", description });
+const int = (description) => ({ type: "integer", description });
+const bool = (description) => ({ type: "boolean", description });
+const obj = (properties, required = []) => ({ type: "object", properties, required, additionalProperties: false });
+const intList = (description) => ({ type: "array", items: { type: "integer" }, minItems: 1, maxItems: 50, description });
+
+function out(data, extra = {}) {
+  const payload = { results: redact(data) };
+  if (Array.isArray(data)) payload.count = data.length;
+  return { ...payload, ...extra };
+}
+const outPage = ({ rows, truncated }) =>
+  out(rows, truncated ? { truncated: "Row limit reached; narrow the filters to see the rest." } : {});
+
+const PROC_STATUS = ["TP", "C", "EC", "EO", "R", "D", "Cn", "TPi"];
+const COMPLETED = new Set(["C", "EC"]);
+const PLANNED = new Set(["TP", "TPi"]);
+
+// Open Dental reports ProcStatus as text ("TP") or, in some versions, a number.
+const STATUS_BY_NUMBER = { 1: "TP", 2: "C", 3: "EC", 4: "EO", 5: "R", 6: "D", 7: "Cn", 8: "TPi" };
+function statusOf(proc) {
+  const s = proc && proc.ProcStatus;
+  return typeof s === "number" ? STATUS_BY_NUMBER[s] : String(s || "");
+}
+
+function today() {
+  // Local calendar date (the office's), yyyy-MM-dd.
+  return new Date().toLocaleDateString("en-CA");
+}
+
+function checkText(name, v, max = 20000) {
+  if (typeof v !== "string" || !v.trim()) throw new ODError(`${name} is required.`, { code: "bad_input" });
+  if (v.length > max) throw new ODError(`${name} is too long (over ${max} characters).`, { code: "bad_input" });
+  return v;
+}
+
+function checkCode(v) {
+  if (typeof v !== "string" || !/^[A-Za-z0-9.\-]{1,15}$/.test(v.trim())) {
+    throw new ODError("proc_code must be a procedure code such as D2393.", { code: "bad_input" });
+  }
+  return v.trim();
+}
+
+function checkTooth(v) {
+  if (v === undefined || v === null || v === "") return undefined;
+  const t = String(v).trim().toUpperCase();
+  // Universal numbering 1-32, primary A-T, supernumerary 51-82 / AS-TS.
+  if (!/^([1-9]|[12][0-9]|3[0-2]|5[1-9]|[67][0-9]|8[0-2]|[A-T]|[A-T]S)$/.test(t)) {
+    throw new ODError(`"${v}" is not a tooth number (use 1-32 or A-T).`, { code: "bad_input" });
+  }
+  return t;
+}
+
+function checkSurf(v) {
+  if (v === undefined || v === null || v === "") return undefined;
+  const s = String(v).trim().toUpperCase();
+  if (!/^[MODBLIFV5]{1,6}$/.test(s)) throw new ODError(`"${v}" is not a surface list (letters M, O, D, B, L, I, F, V, 5).`, { code: "bad_input" });
+  return s;
+}
+
+function checkToothRange(v) {
+  if (v === undefined || v === null || v === "") return undefined;
+  const list = (Array.isArray(v) ? v : String(v).split(",")).map((t) => checkTooth(String(t).trim()));
+  if (!list.length || list.length > 32) throw new ODError("tooth_range must list 1-32 teeth.", { code: "bad_input" });
+  return list.join(",");
+}
+
+function checkName(name, v) {
+  if (v === undefined || v === null || v === "") return undefined;
+  if (typeof v !== "string" || v.length > 100) throw new ODError(`${name} must be a short name.`, { code: "bad_input" });
+  return v.trim();
+}
+
+/**
+ * @param {ReturnType<import('./odclient').createClient>} od
+ * @param {{allowChartChanges: boolean}} opts
+ */
+function buildClinicalTools(od, { allowChartChanges = false } = {}) {
+  const needChart = () => {
+    if (!allowChartChanges) {
+      throw new ODError(
+        'Chart changes are turned off for this connection. Turn on "Allow chart changes" in the Open Dental extension settings to add notes or treatment-planned procedures.',
+        { code: "forbidden" }
+      );
+    }
+  };
+
+  // Small per-session caches for slow-changing lists.
+  let codeCache = null;
+  const defCache = new Map();
+
+  async function allCodes() {
+    if (!codeCache) {
+      const { rows } = await od.getAll("/procedurecodes", {}, { allRows: true });
+      codeCache = rows;
+    }
+    return codeCache;
+  }
+
+  async function definitions(category) {
+    if (!defCache.has(category)) {
+      const rows = await od.request("GET", "/definitions", { params: { Category: category } });
+      defCache.set(category, Array.isArray(rows) ? rows : []);
+    }
+    return defCache.get(category);
+  }
+
+  async function priorityDefNum(name) {
+    if (!name) return undefined;
+    const defs = await definitions(20);
+    const hit = defs.find((d) => String(d.ItemName).toLowerCase() === name.toLowerCase());
+    if (!hit) {
+      throw new ODError(
+        `No treatment priority named "${name}". Office priorities: ${defs.map((d) => d.ItemName).join(", ") || "none set up"}.`,
+        { code: "bad_input" }
+      );
+    }
+    return hit.DefNum;
+  }
+
+  async function getProc(procNum, patNum) {
+    const p = await od.request("GET", `/procedurelogs/${procNum}`);
+    if (!p || typeof p !== "object" || Array.isArray(p)) throw new ODError(`Procedure ${procNum} was not found.`, { code: "not_found" });
+    if (patNum !== undefined && Number(p.PatNum) !== patNum) {
+      throw new ODError(`Procedure ${procNum} belongs to a different patient (PatNum ${p.PatNum}), not ${patNum}. Nothing was changed.`, { code: "forbidden" });
+    }
+    return p;
+  }
+
+  async function getPlan(treatPlanNum, patNum) {
+    const plans = await od.request("GET", "/treatplans", { params: { PatNum: patNum } });
+    const plan = Array.isArray(plans) ? plans.find((t) => Number(t.TreatPlanNum) === treatPlanNum) : null;
+    if (!plan) throw new ODError(`Treatment plan ${treatPlanNum} was not found for patient ${patNum}. Nothing was changed.`, { code: "not_found" });
+    return plan;
+  }
+
+  return [
+    // -------------------------------------------------------------- reads
+    {
+      name: "od_get_progress_notes",
+      annotations: READ,
+      description:
+        "Read a patient's chart progress notes as the Chart module shows them: procedures, notes, group notes, commlogs, with date, tooth, surface, status, provider and whether each note is signed. Newest first.",
+      inputSchema: obj({ pat_num: int("PatNum"), max_rows: int("Maximum rows. Default 100.") }, ["pat_num"]),
+      run: async (a) => outPage(await od.getAll(`/chartmodules/${recordId("pat_num", a.pat_num)}/ProgNotes`, {}, { limit: a.max_rows || 100 })),
+    },
+    {
+      name: "od_get_procedures",
+      annotations: READ,
+      description:
+        "List a patient's procedures (ProcNum, code, tooth, surface, status, date, provider, fee). Filter by status (TP planned, C complete, EC/EO existing, R referred, Cn condition) and/or date. Use status C and date today to find today's completed procedures for a group note.",
+      inputSchema: obj(
+        {
+          pat_num: int("PatNum"),
+          status: { type: "string", enum: PROC_STATUS, description: "Procedure status filter." },
+          date: str("Procedure date yyyy-MM-dd."),
+          max_rows: int("Maximum rows. Default 200."),
+        },
+        ["pat_num"]
+      ),
+      run: async (a) => {
+        checkDate("date", a.date);
+        return outPage(
+          await od.getAll(
+            "/procedurelogs",
+            { PatNum: recordId("pat_num", a.pat_num), ProcStatus: a.status, ProcDate: a.date },
+            { limit: a.max_rows || 200 }
+          )
+        );
+      },
+    },
+    {
+      name: "od_get_procedure_notes",
+      annotations: READ,
+      description: "Read procedure notes for a patient, or one procedure, newest first, including whether each is signed.",
+      inputSchema: obj({ pat_num: int("PatNum"), proc_num: int("Optional ProcNum.") }, ["pat_num"]),
+      run: async (a) =>
+        out(
+          await od.request("GET", "/procnotes", {
+            params: { PatNum: recordId("pat_num", a.pat_num), ProcNum: recordId("proc_num", a.proc_num, { required: false }) },
+          })
+        ),
+    },
+    {
+      name: "od_get_medical_summary",
+      annotations: READ,
+      description:
+        "Read the patient info panel from the Chart: age, premedication, problems, medical urgent note, medical summary, medications, allergies, insurance, restrictions. Check this before treatment planning.",
+      inputSchema: obj({ pat_num: int("PatNum") }, ["pat_num"]),
+      run: async (a) => out(await od.request("GET", `/chartmodules/${recordId("pat_num", a.pat_num)}/PatientInfo`)),
+    },
+    {
+      name: "od_get_treatment_plans",
+      annotations: READ,
+      description:
+        "List a patient's treatment plans (Active, Inactive, Saved) and, by default, the procedures on each with their priority.",
+      inputSchema: obj(
+        {
+          pat_num: int("PatNum"),
+          status: { type: "string", enum: ["Active", "Inactive", "Saved"], description: "Optional status filter." },
+          include_items: bool("Include the procedures on each plan. Default true."),
+        },
+        ["pat_num"]
+      ),
+      run: async (a) => {
+        const plans = await od.request("GET", "/treatplans", { params: { PatNum: recordId("pat_num", a.pat_num), TPStatus: a.status } });
+        if (!Array.isArray(plans) || a.include_items === false) return out(plans);
+        const result = [];
+        for (const p of plans.slice(0, 20)) {
+          const path = p.TPStatus === "Saved" ? "/proctps" : "/treatplanattaches";
+          const items = await od.request("GET", path, { params: { TreatPlanNum: p.TreatPlanNum } }).catch((e) => ({ error: e.message }));
+          result.push({ ...p, items });
+        }
+        return out(result, plans.length > 20 ? { truncated: "Only the first 20 plans include items." } : {});
+      },
+    },
+    {
+      name: "od_lookup_procedure_code",
+      annotations: READ,
+      description:
+        "Look up the office's procedure codes by code (e.g. D2740) or words in the description (e.g. 'crown ceramic'). Returns code, description, treatment area (Tooth, Surf, Quad, Mouth, ToothRange...) and time. Use before planning to confirm the exact code and what tooth/surface it needs.",
+      inputSchema: obj({ query: str("Code or description words."), max_rows: int("Maximum matches. Default 25.") }, ["query"]),
+      run: async (a) => {
+        const q = checkText("query", a.query, 100).trim().toLowerCase();
+        const words = q.split(/\s+/);
+        const codes = await allCodes();
+        const keep = ["CodeNum", "ProcCode", "Descript", "AbbrDesc", "LaymanTerm", "TreatArea", "AreaAlsoToothRange", "ProcTime", "procCat", "IsHygiene", "IsProsth"];
+        const scored = [];
+        for (const c of codes) {
+          const code = String(c.ProcCode || "").toLowerCase();
+          const text = `${c.Descript || ""} ${c.AbbrDesc || ""} ${c.LaymanTerm || ""}`.toLowerCase();
+          let score = 0;
+          if (code === q) score = 100;
+          else if (code.startsWith(q)) score = 50;
+          else if (words.every((w) => text.includes(w) || code.includes(w))) score = 10;
+          if (score) scored.push([score, c]);
+        }
+        scored.sort((x, y) => y[0] - x[0] || String(x[1].ProcCode).localeCompare(String(y[1].ProcCode)));
+        const rows = scored.slice(0, Math.min(a.max_rows || 25, 200)).map(([, c]) => Object.fromEntries(keep.filter((k) => k in c).map((k) => [k, c[k]])));
+        return out(rows, rows.length ? {} : { note: "No matching codes. Try fewer or different words." });
+      },
+    },
+    {
+      name: "od_list_treatment_priorities",
+      annotations: READ,
+      description: "List the office's treatment priority names (e.g. 1, 2, 3, Urgent) and diagnosis names used when planning procedures.",
+      inputSchema: obj({}),
+      run: async () => {
+        const pri = await definitions(20);
+        const dx = await definitions(16);
+        return out({
+          priorities: pri.map((d) => ({ name: d.ItemName, DefNum: d.DefNum })),
+          diagnoses: dx.map((d) => ({ name: d.ItemName, DefNum: d.DefNum })),
+        });
+      },
+    },
+
+    // -------------------------------------------------------------- chart notes
+    {
+      name: "od_add_group_note",
+      annotations: WRITE,
+      description:
+        "CHART CHANGE. Write the visit's clinical note as a group note across the patient's completed procedures for the day (the office's standard way). Find them first with od_get_procedures (status C, date). The note is saved UNSIGNED; the dentist signs it in Open Dental. Show the user the procedures and the exact note text and get a clear yes before calling.",
+      inputSchema: obj(
+        {
+          pat_num: int("PatNum"),
+          proc_nums: intList("ProcNums of the completed procedures the note covers (usually all of today's)."),
+          note: str("The full note text."),
+          prov_num: int("Provider ProvNum for the note. Default: the patient's primary provider."),
+        },
+        ["pat_num", "proc_nums", "note"]
+      ),
+      run: async (a) => {
+        needChart();
+        const patNum = recordId("pat_num", a.pat_num);
+        const note = checkText("note", a.note);
+        if (!Array.isArray(a.proc_nums) || !a.proc_nums.length || a.proc_nums.length > 50) {
+          throw new ODError("proc_nums must list 1-50 procedures.", { code: "bad_input" });
+        }
+        const nums = [...new Set(a.proc_nums.map((n) => recordId("proc_nums", n)))];
+        for (const n of nums) {
+          const p = await getProc(n, patNum);
+          if (!COMPLETED.has(statusOf(p))) {
+            throw new ODError(`Procedure ${n} (${p.procCode || p.ProcCode || "?"}) is not completed (status ${statusOf(p)}); group notes cover completed procedures. Nothing was changed.`, { code: "bad_input" });
+          }
+        }
+        const body = { PatNum: patNum, Note: note, ProcNums: nums, isSigned: "false" };
+        if (a.prov_num != null) body.ProvNum = recordId("prov_num", a.prov_num);
+        return out(await od.request("POST", "/procedurelogs/GroupNote", { body }), { signed: false });
+      },
+    },
+    {
+      name: "od_append_procedure_note",
+      annotations: WRITE,
+      description:
+        "CHART CHANGE. Add text to the end of the note on one procedure or an existing group note (use the group note's ProcNum). Earlier text is kept and Open Dental archives every version. Use for addenda and corrections (e.g. 'Addendum: ...'). Saved UNSIGNED, which removes any signature on that note until the dentist signs again. Show the exact text and get a clear yes first.",
+      inputSchema: obj({ pat_num: int("PatNum"), proc_num: int("ProcNum (or the group note's ProcNum)."), note: str("Text to add.") }, ["pat_num", "proc_num", "note"]),
+      run: async (a) => {
+        needChart();
+        const patNum = recordId("pat_num", a.pat_num);
+        const procNum = recordId("proc_num", a.proc_num);
+        const note = checkText("note", a.note);
+        await getProc(procNum, patNum);
+        return out(
+          await od.request("POST", "/procnotes", { body: { PatNum: patNum, ProcNum: procNum, Note: note, doAppendNote: "true", isSigned: "false" } }),
+          { signed: false }
+        );
+      },
+    },
+
+    // -------------------------------------------------------------- treatment planning
+    {
+      name: "od_plan_procedure",
+      annotations: WRITE,
+      description:
+        "CHART CHANGE. Add a treatment-planned (TP) procedure to the patient's chart, e.g. D2740 on tooth 30. Open Dental sets the fee from the patient's fee schedule and insurance. Confirm the code with od_lookup_procedure_code (its TreatArea says whether tooth, surface or range is needed). Record only what the dentist decided. Optionally add it to a treatment plan. Confirm patient, code, tooth/surface and priority with the user first.",
+      inputSchema: obj(
+        {
+          pat_num: int("PatNum"),
+          proc_code: str("Procedure code, e.g. D2740."),
+          tooth: str("Tooth number 1-32 or A-T, when the code needs one."),
+          surfaces: str("Surfaces, e.g. MOD, when the code needs them."),
+          tooth_range: str("Comma-separated teeth for range codes (bridges, partials), e.g. '3,4,5'."),
+          priority: str("Treatment priority name from od_list_treatment_priorities."),
+          diagnosis: str("Diagnosis name from od_list_treatment_priorities."),
+          prov_num: int("Provider ProvNum. Default: the patient's provider."),
+          note: str("Optional procedure note (saved unsigned)."),
+          treat_plan_num: int("Optional: also add it to this treatment plan."),
+        },
+        ["pat_num", "proc_code"]
+      ),
+      run: async (a) => {
+        needChart();
+        const patNum = recordId("pat_num", a.pat_num);
+        const body = { PatNum: patNum, ProcDate: today(), ProcStatus: "TP", procCode: checkCode(a.proc_code) };
+        const tooth = checkTooth(a.tooth);
+        const surf = checkSurf(a.surfaces);
+        const range = checkToothRange(a.tooth_range);
+        if (tooth) body.ToothNum = tooth;
+        if (surf) body.Surf = surf;
+        if (range) body.ToothRange = range;
+        const pri = checkName("priority", a.priority);
+        const dx = checkName("diagnosis", a.diagnosis);
+        if (pri) body.priority = pri;
+        if (dx) body.dxName = dx;
+        if (a.prov_num != null) body.ProvNum = recordId("prov_num", a.prov_num);
+        const planNum = recordId("treat_plan_num", a.treat_plan_num, { required: false });
+        let plan;
+        if (planNum) {
+          plan = await getPlan(planNum, patNum);
+          if (plan.TPStatus === "Saved") throw new ODError("Saved treatment plans can't take new procedures; use an Active or Inactive plan.", { code: "bad_input" });
+        }
+        const note = a.note ? checkText("note", a.note) : null;
+
+        const created = await od.request("POST", "/procedurelogs", { body });
+        const procNum = Number(created && created.ProcNum);
+        const result = { procedure: created };
+        if (procNum && note) {
+          result.note = await od.request("POST", "/procnotes", { body: { PatNum: patNum, ProcNum: procNum, Note: note, isSigned: "false" } });
+        }
+        if (procNum && plan) {
+          const attach = { TreatPlanNum: planNum, ProcNum: procNum };
+          const defNum = await priorityDefNum(pri);
+          if (defNum) attach.Priority = defNum;
+          result.treatment_plan = await od.request("POST", "/treatplanattaches", { body: attach });
+        }
+        return out(result);
+      },
+    },
+    {
+      name: "od_update_planned_procedure",
+      annotations: WRITE,
+      description:
+        "CHART CHANGE. Change a treatment-planned (TP) procedure: code, tooth, surfaces, range, priority, diagnosis or provider. Completed procedures can't be changed here. Confirm the before and after with the user first.",
+      inputSchema: obj(
+        {
+          pat_num: int("PatNum"),
+          proc_num: int("ProcNum"),
+          proc_code: str("New code (same treatment area as the old one)."),
+          tooth: str("New tooth."),
+          surfaces: str("New surfaces."),
+          tooth_range: str("New tooth range."),
+          priority: str("New priority name."),
+          diagnosis: str("New diagnosis name."),
+          prov_num: int("New provider ProvNum."),
+        },
+        ["pat_num", "proc_num"]
+      ),
+      run: async (a) => {
+        needChart();
+        const patNum = recordId("pat_num", a.pat_num);
+        const procNum = recordId("proc_num", a.proc_num);
+        const p = await getProc(procNum, patNum);
+        if (!PLANNED.has(statusOf(p))) {
+          throw new ODError(`Procedure ${procNum} is not treatment-planned (status ${statusOf(p)}). Only planned procedures can be changed here.`, { code: "forbidden" });
+        }
+        const body = {};
+        if (a.proc_code) body.procCode = checkCode(a.proc_code);
+        const tooth = checkTooth(a.tooth);
+        const surf = checkSurf(a.surfaces);
+        const range = checkToothRange(a.tooth_range);
+        if (tooth) body.ToothNum = tooth;
+        if (surf) body.Surf = surf;
+        if (range) body.ToothRange = range;
+        const pri = checkName("priority", a.priority);
+        const dx = checkName("diagnosis", a.diagnosis);
+        if (pri) body.priority = pri;
+        if (dx) body.dxName = dx;
+        if (a.prov_num != null) body.ProvNum = recordId("prov_num", a.prov_num);
+        if (!Object.keys(body).length) throw new ODError("Nothing to change.", { code: "bad_input" });
+        return out(await od.request("PUT", `/procedurelogs/${procNum}`, { body }));
+      },
+    },
+    {
+      name: "od_remove_planned_procedure",
+      annotations: WRITE_DESTRUCTIVE,
+      description:
+        "CHART CHANGE. Delete a treatment-planned (TP) procedure the dentist no longer wants. Only planned procedures not attached to claims, payments or adjustments can be removed (Open Dental enforces this too). State exactly which procedure and get a clear yes first.",
+      inputSchema: obj({ pat_num: int("PatNum"), proc_num: int("ProcNum") }, ["pat_num", "proc_num"]),
+      run: async (a) => {
+        needChart();
+        const patNum = recordId("pat_num", a.pat_num);
+        const procNum = recordId("proc_num", a.proc_num);
+        const p = await getProc(procNum, patNum);
+        if (!PLANNED.has(statusOf(p))) {
+          throw new ODError(`Procedure ${procNum} is not treatment-planned (status ${statusOf(p)}); only planned procedures can be removed. Nothing was changed.`, { code: "forbidden" });
+        }
+        return out(await od.request("DELETE", `/procedurelogs/${procNum}`));
+      },
+    },
+    {
+      name: "od_create_treatment_plan",
+      annotations: WRITE,
+      description:
+        "CHART CHANGE. Create a new treatment plan (a named group such as 'Phase 1 - Urgent' or 'Option B - Implant') for a patient. It starts Inactive; add procedures with od_add_to_treatment_plan or od_plan_procedure. Confirm the name with the user first.",
+      inputSchema: obj({ pat_num: int("PatNum"), heading: str("Plan name."), note: str("Optional plan note.") }, ["pat_num", "heading"]),
+      run: async (a) => {
+        needChart();
+        const body = { PatNum: recordId("pat_num", a.pat_num), Heading: checkText("heading", a.heading, 200) };
+        if (a.note) body.Note = checkText("note", a.note, 5000);
+        return out(await od.request("POST", "/treatplans", { body }));
+      },
+    },
+    {
+      name: "od_add_to_treatment_plan",
+      annotations: WRITE,
+      description:
+        "CHART CHANGE. Group existing treatment-planned procedures into a treatment plan, optionally with a priority. Confirm the plan and procedures with the user first.",
+      inputSchema: obj(
+        {
+          pat_num: int("PatNum"),
+          treat_plan_num: int("TreatPlanNum"),
+          proc_nums: intList("ProcNums of planned procedures to add."),
+          priority: str("Optional priority name for these procedures on the plan."),
+        },
+        ["pat_num", "treat_plan_num", "proc_nums"]
+      ),
+      run: async (a) => {
+        needChart();
+        const patNum = recordId("pat_num", a.pat_num);
+        const planNum = recordId("treat_plan_num", a.treat_plan_num);
+        const plan = await getPlan(planNum, patNum);
+        if (plan.TPStatus === "Saved") throw new ODError("Saved treatment plans can't take new procedures; use an Active or Inactive plan.", { code: "bad_input" });
+        if (!Array.isArray(a.proc_nums) || !a.proc_nums.length || a.proc_nums.length > 50) {
+          throw new ODError("proc_nums must list 1-50 procedures.", { code: "bad_input" });
+        }
+        const nums = [...new Set(a.proc_nums.map((n) => recordId("proc_nums", n)))];
+        for (const n of nums) {
+          const p = await getProc(n, patNum);
+          if (!PLANNED.has(statusOf(p))) {
+            throw new ODError(`Procedure ${n} is not treatment-planned (status ${statusOf(p)}). Nothing was changed.`, { code: "bad_input" });
+          }
+        }
+        const defNum = await priorityDefNum(checkName("priority", a.priority));
+        const results = [];
+        for (const n of nums) {
+          const body = { TreatPlanNum: planNum, ProcNum: n };
+          if (defNum) body.Priority = defNum;
+          results.push(await od.request("POST", "/treatplanattaches", { body }));
+        }
+        return out(results);
+      },
+    },
+    {
+      name: "od_update_treatment_plan",
+      annotations: WRITE,
+      description: "CHART CHANGE. Rename a treatment plan or change its note. Signatures are never touched. Confirm with the user first.",
+      inputSchema: obj({ pat_num: int("PatNum"), treat_plan_num: int("TreatPlanNum"), heading: str("New name."), note: str("New plan note.") }, ["pat_num", "treat_plan_num"]),
+      run: async (a) => {
+        needChart();
+        const patNum = recordId("pat_num", a.pat_num);
+        const planNum = recordId("treat_plan_num", a.treat_plan_num);
+        const plan = await getPlan(planNum, patNum);
+        if (plan.TPStatus === "Saved") throw new ODError("Saved (presented) plans are kept as they were; change the Active or Inactive plan instead.", { code: "forbidden" });
+        const body = {};
+        if (a.heading) body.Heading = checkText("heading", a.heading, 200);
+        if (a.note) body.Note = checkText("note", a.note, 5000);
+        if (!Object.keys(body).length) throw new ODError("Nothing to change.", { code: "bad_input" });
+        return out(await od.request("PUT", `/treatplans/${planNum}`, { body }));
+      },
+    },
+  ];
+}
+
+module.exports = { buildClinicalTools };

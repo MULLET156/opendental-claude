@@ -328,8 +328,10 @@ function createClient(opts = {}) {
   }
 
   /** Follow Open Dental's Offset paging until a short page or the row cap. */
-  async function getAll(path, params = {}, { limit, method = "GET", body } = {}) {
-    const cap = Math.max(1, Math.min(Number(limit) || maxRows, maxRows));
+  async function getAll(path, params = {}, { limit, method = "GET", body, allRows = false } = {}) {
+    // allRows: for reference lists (e.g. procedure codes) that must be complete; still bounded.
+    const ceiling = allRows ? 100000 : maxRows;
+    const cap = Math.max(1, Math.min(Number(limit) || ceiling, ceiling));
     const rows = [];
     let offset = Number(params.Offset) || 0;
     let pageSize = null;

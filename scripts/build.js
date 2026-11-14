@@ -120,7 +120,7 @@ function buildExtension() {
   const entries = [
     { name: "manifest.json", data: read("extension/manifest.json") },
     { name: "server/index.js", data: read("extension/server/index.js") },
-    ...["odclient.js", "reports.js", "tools.js", "mcp-stdio.js"].map((f) => ({ name: `server/core/${f}`, data: read(`core/${f}`) })),
+    ...["odclient.js", "reports.js", "tools.js", "clinical-tools.js", "mcp-stdio.js"].map((f) => ({ name: `server/core/${f}`, data: read(`core/${f}`) })),
     { name: "README.md", data: read("extension/README.md") },
     { name: "LICENSE", data: read("LICENSE") },
   ];

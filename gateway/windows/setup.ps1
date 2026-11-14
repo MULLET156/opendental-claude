@@ -85,21 +85,111 @@ function Describe-Key([string]$raw) {
 # Asks for an Open Dental key. Removes spaces, line breaks, quotes and invisible characters
 # picked up when copying; if it still doesn't look like a key, says why (without showing it)
 # and offers to show the typing on screen.
+# A small Windows box for one key: normal Ctrl+V / right-click paste, hidden by default
+# with a "Show" box to check it. Returns $null if cancelled; throws if Windows Forms
+# isn't available (the caller then asks in the console instead).
+function AskKeyDialog([string]$question, [string]$problem = "") {
+  Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+  [System.Windows.Forms.Application]::EnableVisualStyles()
+  $form = New-Object System.Windows.Forms.Form
+  $form.Text = "Open Dental Gateway setup"
+  $form.StartPosition = "CenterScreen"
+  $form.TopMost = $true
+  $form.FormBorderStyle = "FixedDialog"
+  $form.MaximizeBox = $false
+  $form.MinimizeBox = $false
+  $form.Font = New-Object System.Drawing.Font("Segoe UI", 10)
+  $form.ClientSize = New-Object System.Drawing.Size(460, 190)
+
+  $label = New-Object System.Windows.Forms.Label
+  $label.Text = "Paste the Open Dental $question here (Ctrl+V, or right-click > Paste):"
+  $label.Location = New-Object System.Drawing.Point(14, 14)
+  $label.Size = New-Object System.Drawing.Size(432, 22)
+
+  $box = New-Object System.Windows.Forms.TextBox
+  $box.Location = New-Object System.Drawing.Point(14, 42)
+  $box.Size = New-Object System.Drawing.Size(432, 26)
+  $box.UseSystemPasswordChar = $true
+
+  $show = New-Object System.Windows.Forms.CheckBox
+  $show.Text = "Show"
+  $show.Location = New-Object System.Drawing.Point(14, 76)
+  $show.AutoSize = $true
+  $show.Add_CheckedChanged({ $box.UseSystemPasswordChar = -not $show.Checked })
+
+  $note = New-Object System.Windows.Forms.Label
+  $note.Text = $problem
+  $note.ForeColor = [System.Drawing.Color]::Firebrick
+  $note.Location = New-Object System.Drawing.Point(14, 104)
+  $note.Size = New-Object System.Drawing.Size(432, 40)
+
+  $ok = New-Object System.Windows.Forms.Button
+  $ok.Text = "OK"
+  $ok.DialogResult = [System.Windows.Forms.DialogResult]::OK
+  $ok.Location = New-Object System.Drawing.Point(270, 150)
+  $ok.Size = New-Object System.Drawing.Size(84, 30)
+
+  $cancel = New-Object System.Windows.Forms.Button
+  $cancel.Text = "Cancel"
+  $cancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+  $cancel.Location = New-Object System.Drawing.Point(362, 150)
+  $cancel.Size = New-Object System.Drawing.Size(84, 30)
+
+  $form.AcceptButton = $ok
+  $form.CancelButton = $cancel
+  $form.Controls.AddRange(@($label, $box, $show, $note, $ok, $cancel))
+  $form.Add_Shown({ $form.Activate(); $box.Focus() | Out-Null })
+  try {
+    $result = $form.ShowDialog()
+    $text = $box.Text
+  } finally {
+    $form.Dispose()
+  }
+  if ($result -ne [System.Windows.Forms.DialogResult]::OK) { return $null }
+  return $text
+}
+
+# Cleans a pasted key: removes spaces, line breaks, invisible characters and quotes.
+function Clean-Key([string]$raw) {
+  return ($raw -replace '[\s\x00-\x1F\x7F\u200B-\u200D\u2060\uFEFF]', '').Trim([char[]]@([char]34, [char]39, [char]0x201C, [char]0x201D, [char]0x2018, [char]0x2019))
+}
+
+# Asks for an Open Dental key in a pop-up box (console as a fallback). If it still doesn't
+# look like a key after cleaning, says why without showing it, and asks again.
 function AskKey([string]$question) {
+  $useDialog = $true
   $visible = $false
+  $problem = ""
   while ($true) {
-    if ($visible) { $raw = Read-Host "   $question (shown on screen)" } else { $raw = AskSecret $question }
+    $raw = $null
+    if ($useDialog) {
+      try {
+        Say "   $($question): paste it in the window that just opened." "White"
+        $raw = AskKeyDialog $question $problem
+        if ($null -eq $raw) { throw (New-Object OperationCanceledException "Setup was cancelled.") }
+      } catch [OperationCanceledException] {
+        throw
+      } catch {
+        $useDialog = $false
+        Warn "Couldn't open the pop-up window, so type or paste the key here instead."
+        continue
+      }
+    } elseif ($visible) {
+      $raw = Read-Host "   $question (shown on screen)"
+    } else {
+      $raw = AskSecret $question
+    }
     if ($null -eq $raw) { $raw = "" }
-    $v = ($raw -replace '[\s\x00-\x1F\x7F\u200B-\u200D\u2060\uFEFF]', '').Trim([char[]]@([char]34, [char]39, [char]0x201C, [char]0x201D, [char]0x2018, [char]0x2019))
+    $v = Clean-Key $raw
     if (-not $v) {
-      if ($raw.Length) { Warn "Nothing was pasted. If Ctrl+V doesn't work in this window, right-click to paste." } else { Warn "This can't be blank." }
+      $problem = if ($raw.Length) { "Nothing was pasted. Copy the key again, then paste it." } else { "This can't be blank." }
     } elseif ($v -match '^[A-Za-z0-9_-]{4,128}$') {
       return $v
     } else {
-      Warn "That doesn't look like an Open Dental key: it has $(Describe-Key $raw)."
-      Say "   Open Dental keys are letters and numbers only." "DarkGray"
+      $problem = "That doesn't look like an Open Dental key: it has $(Describe-Key $raw). Keys are letters and numbers only."
     }
-    if (-not $visible) { $visible = AskYes "Show what you paste on screen so you can check it?" $true }
+    Warn $problem
+    if (-not $useDialog -and -not $visible) { $visible = AskYes "Show what you paste on screen so you can check it?" $true }
   }
 }
 
@@ -288,7 +378,7 @@ try {
       if ($envMap['OD_BASE_URL'] -match 'api\.opendental\.com') {
         $envMap['OD_API_PLAN'] = Ask "Your Open Dental API plan (read-all, standard, enterprise)" $(if ($envMap['OD_API_PLAN']) { $envMap['OD_API_PLAN'] } else { "standard" })
       } else { $envMap.Remove('OD_API_PLAN') }
-      Say "   Paste each key and press Enter. Typing is hidden; right-click pastes if Ctrl+V doesn't." 
+      Say "   A small window opens for each key. Paste the key there and click OK."
       $envMap['OD_DEVELOPER_KEY'] = AskKey "Developer Key"
       $envMap['OD_CUSTOMER_KEY'] = AskKey "Customer Key"
       Write-EnvFile $EnvFile $envMap

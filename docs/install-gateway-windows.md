@@ -17,7 +17,7 @@ You need:
    - Click **Yes** when Windows asks for administrator permission.
 4. Answer the questions:
    - **API address**: press Enter for the default on the Open Dental server.
-   - **Developer Key** and **Customer Key**: paste each (typing is hidden). Setup tests them right away.
+   - **Developer Key** and **Customer Key**: a small window opens for each. Paste the key (Ctrl+V or right-click → Paste), tick **Show** if you want to check it, and click **OK**. Setup tests them right away.
    - **Lab tracker sync**: answer **y**, then the tracker address, your in-house lab number(s) (Setup lists your labs), the start date and how patients appear (J. Smith or J.S.).
    - Setup shows a line like `define('OD_SYNC_SECRET', '…');` and copies it to the clipboard. Paste it into the tracker's `config.php` on your web host, save, then press Enter.
    - It shows a **preview** of what would be sent (nothing is sent yet), then offers to send once to check the tracker answers.

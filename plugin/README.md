@@ -7,6 +7,6 @@ Six skills that teach Claude how to use the Open Dental connector in a dental of
 - **od-billing**: A/R aging, family balances, outstanding and unsent claims
 - **od-production**: production, adjustments, write-offs, collections, scheduled production, new patients
 - **od-lab**: lab case board (overdue, seat risk), creating and tracking cases, cleanup of cases never marked received
-- **od-clinical**: progress notes, visit group notes and addenda (unsigned), treatment-planned procedures and treatment plans
+- **od-clinical**: progress notes, visit group notes and addenda (unsigned), treatment planning, procedure status (complete, existing, referred, condition), tooth chart (missing, hidden, primary/permanent)
 
 These skills need the Open Dental connector (`opendental.mcpb`) installed in Claude desktop. Setup and documentation: https://github.com/MULLET156/opendental-claude

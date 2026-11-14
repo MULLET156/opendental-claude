@@ -1,6 +1,6 @@
 # Open Dental connector for Claude
 
-Lets Claude read your Open Dental schedule, patients, chart, lab cases, A/R, claims and production through Open Dental's official API. Only if you turn them on, it can also change the schedule and lab cases (book, move, confirm or break appointments, add commlogs, create and update lab cases) and the chart (unsigned group notes and addenda, treatment-planned procedures and treatment plans), after you approve each change.
+Lets Claude read your Open Dental schedule, patients, chart, lab cases, A/R, claims and production through Open Dental's official API. Only if you turn them on, it can also change the schedule and lab cases (book, move, confirm or break appointments, add commlogs, create and update lab cases) and the chart (unsigned group notes and addenda, treatment plans, completing procedures, charting existing work, referrals and conditions, and marking teeth missing, hidden, primary or permanent), after you approve each change.
 
 Settings (Claude > Settings > Extensions > Open Dental):
 

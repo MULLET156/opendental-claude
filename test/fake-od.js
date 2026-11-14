@@ -7,6 +7,12 @@ function startFakeOD({ port = 0, onRequest } = {}) {
   const requests = [];
   const state = {
     failNext: [], // e.g. [{status:429, retryAfter:"0"}]
+    toothinitials: [
+      { ToothInitialNum: 301, PatNum: 1, ToothNum: "1", InitialType: "Missing" },
+      { ToothInitialNum: 302, PatNum: 1, ToothNum: "4", InitialType: "Primary" },
+      { ToothInitialNum: 303, PatNum: 1, ToothNum: "16", InitialType: "Hidden" },
+      { ToothInitialNum: 304, PatNum: 2, ToothNum: "17", InitialType: "Missing" },
+    ],
     labcases: {
       1: { LabCaseNum: 1, PatNum: 1, AptNum: 50, DateTimeSent: "2019-03-01 09:00:00", DateTimeRecd: "0001-01-01 00:00:00", DateTimeChecked: "0001-01-01 00:00:00" },
       2: { LabCaseNum: 2, PatNum: 1, AptNum: 50, DateTimeSent: "0001-01-01 00:00:00", DateTimeRecd: "0001-01-01 00:00:00" },
@@ -30,6 +36,8 @@ function startFakeOD({ port = 0, onRequest } = {}) {
       103: { ProcNum: 103, PatNum: 1, ProcStatus: "TP", procCode: "D2740", ToothNum: "30" },
       104: { ProcNum: 104, PatNum: 2, ProcStatus: "C", procCode: "D1110" },
       105: { ProcNum: 105, PatNum: 1, ProcStatus: 1, procCode: "D2393" },
+      106: { ProcNum: 106, PatNum: 1, ProcStatus: "EO", procCode: "D2750", ToothNum: "19" },
+      107: { ProcNum: 107, PatNum: 1, ProcStatus: "D", procCode: "D0120" },
     },
   };
 
@@ -127,6 +135,10 @@ function startFakeOD({ port = 0, onRequest } = {}) {
         const ap = state.appts[m[1]];
         return ap ? json(200, ap) : json(404, { message: "Appointment not found" });
       }
+      // ---- tooth chart
+      if (p === "/toothinitials" && req.method === "GET") return json(200, state.toothinitials.filter((x) => String(x.PatNum) === rec.query.PatNum));
+      if (p === "/toothinitials" && req.method === "POST") return json(201, { ToothInitialNum: 400, ...rec.body });
+      if ((m = p.match(/^\/toothinitials\/(\d+)$/)) && req.method === "DELETE") return json(200, { ok: true });
       if (p === "/boom") return json(500, { message: `server error with key ${req.headers.authorization}` });
       json(404, { message: "not found" });
     });

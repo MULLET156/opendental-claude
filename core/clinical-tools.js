@@ -93,6 +93,33 @@ function checkName(name, v) {
   return v.trim();
 }
 
+// Primary teeth sit in the positions of permanent teeth 4-13 (A-J) and 20-29 (K-T).
+// Open Dental marks a position as primary with a "Primary" tooth initial on the permanent number.
+const PRIMARY_LETTERS = "ABCDEFGHIJKLMNOPQRST".split("");
+const PRIMARY_POSITIONS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29];
+function permanentPosition(tooth) {
+  const t = String(tooth).trim().toUpperCase();
+  const i = PRIMARY_LETTERS.indexOf(t);
+  if (i >= 0) return String(PRIMARY_POSITIONS[i]);
+  if (/^\d+$/.test(t) && PRIMARY_POSITIONS.includes(Number(t))) return t;
+  throw new ODError(`Tooth ${tooth} has no primary tooth. Primary teeth are A-T, in the positions of permanent teeth 4-13 and 20-29.`, { code: "bad_input" });
+}
+function primaryLetter(perm) {
+  const i = PRIMARY_POSITIONS.indexOf(Number(perm));
+  return i >= 0 ? PRIMARY_LETTERS[i] : null;
+}
+
+// Statuses a procedure can be charted with or changed to here (Open Dental API codes).
+const CHART_STATUS = {
+  complete: "C",
+  existing_current_provider: "EC",
+  existing_other_provider: "EO",
+  referred: "R",
+  condition: "Cn",
+  treatment_planned: "TP",
+};
+const STATUS_NAMES = { TP: "treatment planned", TPi: "treatment planned (inactive)", C: "complete", EC: "existing (current provider)", EO: "existing (other provider)", R: "referred out", Cn: "condition", D: "deleted" };
+
 /**
  * @param {ReturnType<import('./odclient').createClient>} od
  * @param {{allowChartChanges: boolean}} opts
@@ -519,6 +546,168 @@ function buildClinicalTools(od, { allowChartChanges = false } = {}) {
         if (a.note) body.Note = checkText("note", a.note, 5000);
         if (!Object.keys(body).length) throw new ODError("Nothing to change.", { code: "bad_input" });
         return out(await od.request("PUT", `/treatplans/${planNum}`, { body }));
+      },
+    },
+
+    // -------------------------------------------------------------- procedure status
+    {
+      name: "od_chart_procedure",
+      annotations: WRITE,
+      description:
+        "CHART CHANGE. Chart a procedure with a status other than treatment planned: complete (work done today; POSTS THE FEE TO THE PATIENT'S ACCOUNT and counts as production), existing_current_provider / existing_other_provider (work already in the mouth, e.g. an old crown), referred (referred out), or condition (a finding such as a fracture or caries, using a condition code). For planned work use od_plan_procedure. Confirm patient, code, tooth/surfaces, status and date with the user first; for complete, also say a charge will post.",
+      inputSchema: obj(
+        {
+          pat_num: int("PatNum"),
+          proc_code: str("Procedure or condition code, e.g. D2740."),
+          status: { type: "string", enum: ["complete", "existing_current_provider", "existing_other_provider", "referred", "condition"], description: "Status to chart." },
+          tooth: str("Tooth 1-32 or A-T, when the code needs one."),
+          surfaces: str("Surfaces, e.g. MOD."),
+          tooth_range: str("Comma-separated teeth for range codes."),
+          date: str("Procedure date yyyy-MM-dd. Default today."),
+          diagnosis: str("Diagnosis name."),
+          prov_num: int("Provider ProvNum."),
+          apt_num: int("For complete: the patient's appointment the work was done in."),
+          note: str("Optional procedure note (saved unsigned)."),
+        },
+        ["pat_num", "proc_code", "status"]
+      ),
+      run: async (a) => {
+        needChart();
+        const patNum = recordId("pat_num", a.pat_num);
+        const code = CHART_STATUS[a.status];
+        if (!code || code === "TP") throw new ODError("status must be complete, existing_current_provider, existing_other_provider, referred or condition. Use od_plan_procedure for planned work.", { code: "bad_input" });
+        checkDate("date", a.date);
+        const body = { PatNum: patNum, ProcDate: a.date || today(), ProcStatus: code, procCode: checkCode(a.proc_code) };
+        const tooth = checkTooth(a.tooth);
+        const surf = checkSurf(a.surfaces);
+        const range = checkToothRange(a.tooth_range);
+        if (tooth) body.ToothNum = tooth;
+        if (surf) body.Surf = surf;
+        if (range) body.ToothRange = range;
+        const dx = checkName("diagnosis", a.diagnosis);
+        if (dx) body.dxName = dx;
+        if (a.prov_num != null) body.ProvNum = recordId("prov_num", a.prov_num);
+        if (a.apt_num != null) {
+          if (code !== "C") throw new ODError("apt_num only applies to completed procedures.", { code: "bad_input" });
+          const aptNum = recordId("apt_num", a.apt_num);
+          const appt = await od.request("GET", `/appointments/${aptNum}`);
+          if (!appt || Number(appt.PatNum) !== patNum) throw new ODError(`Appointment ${aptNum} belongs to a different patient. Nothing was changed.`, { code: "forbidden" });
+          body.AptNum = aptNum;
+        }
+        const note = a.note ? checkText("note", a.note) : null;
+        const created = await od.request("POST", "/procedurelogs", { body });
+        const result = { procedure: created, status: STATUS_NAMES[code] };
+        const procNum = Number(created && created.ProcNum);
+        if (procNum && note) result.note = await od.request("POST", "/procnotes", { body: { PatNum: patNum, ProcNum: procNum, Note: note, isSigned: "false" } });
+        return out(result, code === "C" ? { charge: "Completed: the procedure fee posted to the patient's account." } : {});
+      },
+    },
+    {
+      name: "od_set_procedure_status",
+      annotations: WRITE,
+      description:
+        "CHART CHANGE. Change an existing procedure's status: complete a treatment-planned procedure (POSTS THE FEE to the account; date defaults to today), or set it to existing (current or other provider), referred, condition, or back to treatment planned. Completed procedures are never changed here (they carry billing history; correct them in Open Dental). Confirm the procedure, the old and new status and the date first; for complete, also say a charge will post.",
+      inputSchema: obj(
+        {
+          pat_num: int("PatNum"),
+          proc_num: int("ProcNum"),
+          status: { type: "string", enum: Object.keys(CHART_STATUS), description: "New status." },
+          date: str("Procedure date yyyy-MM-dd. For complete, defaults to today."),
+        },
+        ["pat_num", "proc_num", "status"]
+      ),
+      run: async (a) => {
+        needChart();
+        const patNum = recordId("pat_num", a.pat_num);
+        const procNum = recordId("proc_num", a.proc_num);
+        const code = CHART_STATUS[a.status];
+        if (!code) throw new ODError(`status must be one of ${Object.keys(CHART_STATUS).join(", ")}.`, { code: "bad_input" });
+        checkDate("date", a.date);
+        const p = await getProc(procNum, patNum);
+        const from = statusOf(p);
+        if (from === "C") throw new ODError(`Procedure ${procNum} is already complete. Completed procedures carry billing history; change them in Open Dental. Nothing was changed.`, { code: "forbidden" });
+        if (from === "D") throw new ODError(`Procedure ${procNum} is deleted. Nothing was changed.`, { code: "forbidden" });
+        if (from === code) throw new ODError(`Procedure ${procNum} is already ${STATUS_NAMES[code]}. Nothing was changed.`, { code: "bad_input" });
+        const body = { ProcStatus: code };
+        if (a.date) body.ProcDate = a.date;
+        else if (code === "C") body.ProcDate = today();
+        const result = await od.request("PUT", `/procedurelogs/${procNum}`, { body });
+        return out(result, {
+          changed: `${STATUS_NAMES[from] || from} → ${STATUS_NAMES[code]}`,
+          ...(code === "C" ? { charge: "Completed: the procedure fee posted to the patient's account." } : {}),
+        });
+      },
+    },
+
+    // -------------------------------------------------------------- tooth chart
+    {
+      name: "od_get_tooth_chart",
+      annotations: READ,
+      description: "Read the patient's tooth chart markings: missing teeth, hidden (unerupted) teeth, positions showing primary teeth (with their letters), and tooth movements.",
+      inputSchema: obj({ pat_num: int("PatNum") }, ["pat_num"]),
+      run: async (a) => {
+        const rows = await od.request("GET", "/toothinitials", { params: { PatNum: recordId("pat_num", a.pat_num) } });
+        const list = Array.isArray(rows) ? rows : [];
+        const of = (t) => list.filter((r) => r.InitialType === t).map((r) => String(r.ToothNum));
+        return out({
+          missing: of("Missing"),
+          hidden: of("Hidden"),
+          primary: of("Primary").map((perm) => ({ position: perm, primary_tooth: primaryLetter(perm) })),
+          movements: list.filter((r) => !["Missing", "Hidden", "Primary"].includes(r.InitialType)),
+          raw: list,
+        });
+      },
+    },
+    {
+      name: "od_set_tooth_status",
+      annotations: WRITE,
+      description:
+        "CHART CHANGE. Mark teeth on the tooth chart: missing / not_missing, hidden (unerupted) / not_hidden, primary (show the primary tooth in that position) / permanent (show the permanent tooth again, e.g. after exfoliation). Teeth: 1-32 or A-T; for primary/permanent a letter or the permanent position (4-13, 20-29) both work. Already-correct teeth are skipped. Confirm the teeth and the change with the user first.",
+      inputSchema: obj(
+        {
+          pat_num: int("PatNum"),
+          teeth: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 32, description: "Teeth, e.g. [\"1\", \"16\"] or [\"A\", \"T\"]." },
+          status: { type: "string", enum: ["missing", "not_missing", "hidden", "not_hidden", "primary", "permanent"], description: "What to mark." },
+        },
+        ["pat_num", "teeth", "status"]
+      ),
+      run: async (a) => {
+        needChart();
+        const patNum = recordId("pat_num", a.pat_num);
+        if (!Array.isArray(a.teeth) || !a.teeth.length || a.teeth.length > 32) throw new ODError("teeth must list 1-32 teeth.", { code: "bad_input" });
+        const kind = { missing: "Missing", not_missing: "Missing", hidden: "Hidden", not_hidden: "Hidden", primary: "Primary", permanent: "Primary" }[a.status];
+        if (!kind) throw new ODError("status must be missing, not_missing, hidden, not_hidden, primary or permanent.", { code: "bad_input" });
+        const adding = ["missing", "hidden", "primary"].includes(a.status);
+        // Validate every tooth before changing anything.
+        const teeth = a.teeth.map((t) => {
+          const valid = checkTooth(t);
+          if (!valid) throw new ODError("Each tooth must be 1-32 or A-T.", { code: "bad_input" });
+          if (/S$/.test(valid)) throw new ODError(`Supernumerary teeth (${valid}) can't be marked here.`, { code: "bad_input" });
+          return kind === "Primary" ? permanentPosition(valid) : valid;
+        });
+        const existing = await od.request("GET", "/toothinitials", { params: { PatNum: patNum } });
+        const marks = (Array.isArray(existing) ? existing : []).filter((r) => r.InitialType === kind && Number(r.PatNum ?? patNum) === patNum);
+        const results = [];
+        for (const t of [...new Set(teeth)]) {
+          const label = kind === "Primary" ? `${t} (${primaryLetter(t)})` : t;
+          const mine = marks.filter((r) => String(r.ToothNum).toUpperCase() === t);
+          if (adding) {
+            if (mine.length) {
+              results.push({ tooth: label, result: `already ${a.status}` });
+              continue;
+            }
+            await od.request("POST", "/toothinitials", { body: { PatNum: patNum, ToothNum: t, InitialType: kind } });
+            results.push({ tooth: label, result: `marked ${a.status}` });
+          } else {
+            if (!mine.length) {
+              results.push({ tooth: label, result: `already ${a.status.replace("_", " ")}` });
+              continue;
+            }
+            for (const r of mine) await od.request("DELETE", `/toothinitials/${recordId("ToothInitialNum", r.ToothInitialNum)}`);
+            results.push({ tooth: label, result: `marked ${a.status.replace("_", " ")}` });
+          }
+        }
+        return out(results);
       },
     },
   ];

@@ -22,9 +22,12 @@ test("clinical tools: names and change markings", async (t) => {
     "od_add_group_note",
     "od_add_to_treatment_plan",
     "od_append_procedure_note",
+    "od_chart_procedure",
     "od_create_treatment_plan",
     "od_plan_procedure",
     "od_remove_planned_procedure",
+    "od_set_procedure_status",
+    "od_set_tooth_status",
     "od_update_planned_procedure",
     "od_update_treatment_plan",
   ]);
@@ -61,6 +64,9 @@ test("every chart change is refused while chart changes are off", async (t) => {
     ["od_create_treatment_plan", { pat_num: 1, heading: "x" }],
     ["od_add_to_treatment_plan", { pat_num: 1, treat_plan_num: 9, proc_nums: [103] }],
     ["od_update_treatment_plan", { pat_num: 1, treat_plan_num: 9, heading: "x" }],
+    ["od_chart_procedure", { pat_num: 1, proc_code: "D2750", status: "existing_other_provider", tooth: "19" }],
+    ["od_set_procedure_status", { pat_num: 1, proc_num: 103, status: "complete" }],
+    ["od_set_tooth_status", { pat_num: 1, teeth: ["32"], status: "missing" }],
   ];
   for (const [name, args] of calls) await assert.rejects(run(name, args), /Chart changes are turned off/, name);
   assert.equal(writes().length, 0);
@@ -167,4 +173,93 @@ test("treatment plans: create, group, rename; saved plans and other patients ref
   assert.equal(writes().length, n);
   // No tool ever sends a signature.
   for (const w of writes()) assert.ok(!w.body || (w.body.isSigned !== "true" && w.body.isSignedPractice === undefined));
+});
+
+test("chart a procedure as complete, existing, referred or condition", async (t) => {
+  const { run, writes } = await setup(t);
+  const r = await run("od_chart_procedure", { pat_num: 1, proc_code: "D2750", status: "existing_other_provider", tooth: "19", note: "PFM, margins intact" });
+  assert.equal(r.results.status, "existing (other provider)");
+  const [proc, note] = writes().slice(-2);
+  assert.equal(proc.body.ProcStatus, "EO");
+  assert.equal(proc.body.ToothNum, "19");
+  assert.match(proc.body.ProcDate, /^\d{4}-\d{2}-\d{2}$/);
+  assert.equal(note.body.isSigned, "false");
+
+  const c = await run("od_chart_procedure", { pat_num: 1, proc_code: "D2391", status: "complete", tooth: "3", surfaces: "O", date: "2026-11-13", apt_num: 50 });
+  assert.match(c.charge, /fee posted/);
+  assert.deepEqual(
+    { s: writes().at(-1).body.ProcStatus, d: writes().at(-1).body.ProcDate, a: writes().at(-1).body.AptNum },
+    { s: "C", d: "2026-11-13", a: 50 }
+  );
+  for (const [status, code] of [["existing_current_provider", "EC"], ["referred", "R"], ["condition", "Cn"]]) {
+    await run("od_chart_procedure", { pat_num: 1, proc_code: "D9999", status, tooth: "30" });
+    assert.equal(writes().at(-1).body.ProcStatus, code);
+  }
+  const n = writes().length;
+  await assert.rejects(run("od_chart_procedure", { pat_num: 1, proc_code: "D2740", status: "treatment_planned" }), /complete, existing/);
+  await assert.rejects(run("od_chart_procedure", { pat_num: 1, proc_code: "D2740", status: "complete", apt_num: 53 }), /different patient/);
+  await assert.rejects(run("od_chart_procedure", { pat_num: 1, proc_code: "D2740", status: "referred", apt_num: 50 }), /only applies to completed/);
+  await assert.rejects(run("od_chart_procedure", { pat_num: 1, proc_code: "D2740", status: "complete", date: "2026-13-01" }), /real date/);
+  assert.equal(writes().length, n);
+});
+
+test("change procedure status: never touches completed or deleted procedures", async (t) => {
+  const { run, writes } = await setup(t);
+  const r = await run("od_set_procedure_status", { pat_num: 1, proc_num: 103, status: "complete" });
+  assert.equal(r.changed, "treatment planned → complete");
+  assert.match(r.charge, /fee posted/);
+  assert.equal(writes().at(-1).body.ProcStatus, "C");
+  assert.match(writes().at(-1).body.ProcDate, /^\d{4}-/);
+  await run("od_set_procedure_status", { pat_num: 1, proc_num: 106, status: "existing_current_provider", date: "2015-06-01" });
+  assert.deepEqual(writes().at(-1).body, { ProcStatus: "EC", ProcDate: "2015-06-01" });
+  await run("od_set_procedure_status", { pat_num: 1, proc_num: 105, status: "referred" });
+  assert.deepEqual(writes().at(-1).body, { ProcStatus: "R" });
+  const n = writes().length;
+  await assert.rejects(run("od_set_procedure_status", { pat_num: 1, proc_num: 101, status: "treatment_planned" }), /already complete/);
+  await assert.rejects(run("od_set_procedure_status", { pat_num: 1, proc_num: 107, status: "complete" }), /deleted/);
+  await assert.rejects(run("od_set_procedure_status", { pat_num: 1, proc_num: 106, status: "existing_other_provider" }), /already existing/);
+  await assert.rejects(run("od_set_procedure_status", { pat_num: 2, proc_num: 103, status: "complete" }), /different patient/);
+  await assert.rejects(run("od_set_procedure_status", { pat_num: 1, proc_num: 103, status: "done" }), /status must be/);
+  assert.equal(writes().length, n);
+});
+
+test("tooth chart: read and mark missing, hidden, primary, permanent", async (t) => {
+  const { run, writes } = await setup(t);
+  const chart = await run("od_get_tooth_chart", { pat_num: 1 });
+  assert.deepEqual(chart.results.missing, ["1"]);
+  assert.deepEqual(chart.results.hidden, ["16"]);
+  assert.deepEqual(chart.results.primary, [{ position: "4", primary_tooth: "A" }]);
+
+  let r = await run("od_set_tooth_status", { pat_num: 1, teeth: ["1", "32", "17"], status: "missing" });
+  assert.deepEqual(r.results.map((x) => x.result), ["already missing", "marked missing", "marked missing"]);
+  assert.deepEqual(writes().slice(-2).map((w) => [w.method, w.body.ToothNum, w.body.InitialType]), [
+    ["POST", "32", "Missing"],
+    ["POST", "17", "Missing"],
+  ]);
+  r = await run("od_set_tooth_status", { pat_num: 1, teeth: ["1"], status: "not_missing" });
+  assert.equal(writes().at(-1).method, "DELETE");
+  assert.match(writes().at(-1).path, /toothinitials\/301$/);
+
+  // Primary: letters map to their permanent positions (T = 29, K = 20).
+  r = await run("od_set_tooth_status", { pat_num: 1, teeth: ["T", "20"], status: "primary" });
+  assert.deepEqual(r.results.map((x) => x.tooth), ["29 (T)", "20 (K)"]);
+  assert.deepEqual(writes().slice(-2).map((w) => w.body.ToothNum), ["29", "20"]);
+  // Permanent: removes the primary marking (A sits at position 4).
+  r = await run("od_set_tooth_status", { pat_num: 1, teeth: ["A"], status: "permanent" });
+  assert.match(writes().at(-1).path, /toothinitials\/302$/);
+  r = await run("od_set_tooth_status", { pat_num: 1, teeth: ["5"], status: "permanent" });
+  assert.equal(r.results[0].result, "already permanent");
+
+  await run("od_set_tooth_status", { pat_num: 1, teeth: ["16"], status: "not_hidden" });
+  assert.match(writes().at(-1).path, /toothinitials\/303$/);
+
+  const n = writes().length;
+  await assert.rejects(run("od_set_tooth_status", { pat_num: 1, teeth: ["1", "33"], status: "missing" }), /tooth number/);
+  await assert.rejects(run("od_set_tooth_status", { pat_num: 1, teeth: ["1"], status: "primary" }), /no primary tooth/);
+  await assert.rejects(run("od_set_tooth_status", { pat_num: 1, teeth: ["AS"], status: "missing" }), /Supernumerary/);
+  await assert.rejects(run("od_set_tooth_status", { pat_num: 1, teeth: [], status: "missing" }), /1-32 teeth/);
+  // Another patient's markings are never deleted.
+  r = await run("od_set_tooth_status", { pat_num: 1, teeth: ["17"], status: "not_missing" });
+  assert.equal(r.results[0].result, "already not missing");
+  assert.equal(writes().length, n);
 });

@@ -1,6 +1,6 @@
 ---
 name: od-clinical
-description: Use when the user wants to read or write clinical chart notes or treatment plans in Open Dental — "write today's note for Jane Smith", "add the group note for this visit", "what did we do last visit", "add an addendum", "treatment plan a crown on 30", "plan MOD composite on 3 and 14", "put the implant workup in phase 2", "what's treatment planned", "check her meds and allergies". Covers progress notes, group notes, addenda, treatment-planned procedures and treatment-plan groupings.
+description: Use when the user wants to read or change the clinical chart in Open Dental — "write today's note for Jane Smith", "add the group note for this visit", "what did we do last visit", "add an addendum", "treatment plan a crown on 30", "plan MOD composite on 3 and 14", "put the implant workup in phase 2", "complete the crown on 30", "chart an existing PFM on 19 from another dentist", "chart a fracture on 14", "referred the 3rd molars to the oral surgeon", "mark 1, 16, 17 and 32 missing", "K has exfoliated, change it to permanent", "check her meds and allergies". Covers progress notes, group notes, addenda, treatment planning, procedure status, and the tooth chart (missing, hidden, primary/permanent).
 ---
 
 # Open Dental chart notes and treatment planning
@@ -47,4 +47,22 @@ If procedures aren't marked complete yet, say so; the group note covers complete
 6. **Grouping into plans:** `od_create_treatment_plan` for a named group (e.g. "Phase 1 - Urgent", "Option A - Implant", "Option B - Bridge"), then `od_add_to_treatment_plan` or pass `treat_plan_num` when planning. Plans start Inactive; the office activates and presents them in Open Dental.
 7. Changes: `od_update_planned_procedure` (planned only), `od_remove_planned_procedure` (planned only, confirm first), `od_update_treatment_plan` for names and notes.
 
-Do not mark procedures complete, schedule them, or estimate insurance here; those happen in Open Dental (or with od-schedule for appointments).
+Do not schedule or estimate insurance here; those happen in Open Dental (or with od-schedule for appointments).
+
+## Procedure status (complete, existing, referred, condition)
+
+- **Complete planned work:** `od_set_procedure_status` with `status: "complete"` (date defaults to today). Completing **posts the fee to the patient's account and counts as production**: say so in the confirmation, and check the procedure, tooth, surfaces and date are right before the yes. Usually done for the day's work before writing the group note.
+- **Chart something new with a status:** `od_chart_procedure`:
+  - `complete`: work done today that wasn't planned (same charge warning; pass `apt_num` when it belongs to today's appointment).
+  - `existing_current_provider` / `existing_other_provider`: restorations already in the mouth (e.g. "existing PFM on 19 from previous dentist"). Use the restoration's own code.
+  - `referred`: treatment referred out (e.g. third molars to the oral surgeon).
+  - `condition`: findings such as fractures, caries, abfractions, using the office's condition codes (find them with `od_lookup_procedure_code`, e.g. "fracture").
+- **Change a status:** `od_set_procedure_status` works on planned, existing, referred and condition procedures. It never changes completed procedures (billing history); if one is wrong, tell the user to correct it in Open Dental.
+
+## Tooth chart (missing, hidden, primary/permanent)
+
+- Read with `od_get_tooth_chart` (missing, hidden/unerupted, positions showing primary teeth with their letters).
+- Change with `od_set_tooth_status`: `missing` / `not_missing`, `hidden` / `not_hidden`, `primary` / `permanent`. Several teeth at once are fine; already-correct teeth are skipped.
+- Primary teeth A-J sit in permanent positions 4-13 and K-T in 20-29 (A = 4, J = 13, K = 20, T = 29). Teeth 1-3, 14-19 and 30-32 have no primary tooth. "Change K to permanent" (exfoliated, permanent tooth erupted) removes the primary marking on position 20.
+- Marking a tooth missing records the chart only; if it was extracted here, also chart the extraction (`od_chart_procedure` complete, or complete the planned extraction).
+- Confirm the teeth, using both numbers for primary ("K / #20"), before changing.

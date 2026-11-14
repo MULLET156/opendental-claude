@@ -19,5 +19,5 @@
 
 ## Layout
 
-- `core/` shared client and safety checks (`odclient.js`), reports, Claude tools (`tools.js` schedule/patients/reports, `clinical-tools.js` chart notes and treatment planning), MCP protocol.
+- `core/` shared client and safety checks (`odclient.js`), reports, Claude tools (`tools.js` schedule/patients/reports, `clinical-tools.js` chart notes, treatment planning, procedure status and tooth chart, `lab-tools.js` lab cases), MCP protocol.
 - `extension/` Claude desktop extension; `plugin/` Claude skills; `gateway/` app API gateway; `test/` tests with a fake Open Dental server (`test/fake-od.js`).

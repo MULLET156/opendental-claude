@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0 — 2026-11-14
+
+- **Procedure status** (needs **Allow chart changes**):
+  - `od_chart_procedure`: chart a procedure as complete, existing (current or other provider), referred, or condition, with tooth, surfaces, date, diagnosis, optional appointment and note.
+  - `od_set_procedure_status`: complete a planned procedure or move it between planned, existing, referred and condition. Completed and deleted procedures are never changed. Completing reports that the fee posted.
+- **Tooth chart**: `od_get_tooth_chart` (missing, hidden, primary positions, movements) and `od_set_tooth_status` (missing / not missing, hidden / not hidden, primary / permanent; letters A-T map to permanent positions 4-13 and 20-29; already-correct teeth skipped; only the named patient's markings are removed).
+- od-clinical skill covers completing work, existing restorations, referrals, conditions and the tooth chart.
+
 ## 0.5.0 — 2026-11-14
 
 - **Lab cases** in the Claude connector (7 new tools): list labs with turnaround times; a patient's or appointment's lab cases; an open-case board with overdue and seat-risk flags; create a lab case (optionally linked to the seat appointment, due date from a lab turnaround, mark sent); mark sent, received or checked in order; update due date, instructions, seat appointment, lab, fee or invoice. Changes use the **Allow schedule changes** setting. Nothing deletes a lab case.

@@ -21,7 +21,7 @@ The gateway handles patient data, so run it somewhere you'd be comfortable keepi
 
 ## Set up
 
-**Installing on a Windows office server?** Download **opendental-gateway-windows.zip** from the latest release and run **Setup.cmd**; see **[install-gateway-windows.md](install-gateway-windows.md)**.
+**Installing on a Windows office server?** Download **opendental-gateway-windows-&lt;version&gt;.zip** from the latest release and run **Setup.cmd**; see **[install-gateway-windows.md](install-gateway-windows.md)**.
 
 ```bash
 git clone https://github.com/MULLET156/opendental-claude.git

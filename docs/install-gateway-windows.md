@@ -10,7 +10,7 @@ You need:
 
 ## Easy way: Setup (about 10 minutes)
 
-1. Download **opendental-gateway-windows.zip** from the [latest release](https://github.com/MULLET156/opendental-claude/releases/latest) onto the office server.
+1. Download **opendental-gateway-windows-&lt;version&gt;.zip** (for example `opendental-gateway-windows-0.8.0.zip`) from the [latest release](https://github.com/MULLET156/opendental-claude/releases/latest) onto the office server. Setup shows the version it installs.
 2. Right-click it → **Extract All**.
 3. In the extracted folder, double-click **Setup.cmd**.
    - If Windows shows **"Windows protected your PC"**, click **More info → Run anyway** (the script isn't code-signed).

@@ -4,7 +4,7 @@
  * Build the installable files into dist/ with no npm dependencies:
  *   dist/opendental.mcpb    Claude desktop extension (the connector)
  *   dist/opendental.plugin  Claude plugin (the skills)
- *   dist/opendental-gateway-windows.zip  app gateway with the Windows setup
+ *   dist/opendental-gateway-windows-<version>.zip  app gateway with the Windows setup
  *
  *   node scripts/build.js
  */
@@ -154,6 +154,11 @@ newer zip and run its Setup.cmd; your keys and settings are kept.
 Guide: https://github.com/MULLET156/opendental-claude/blob/main/docs/install-gateway-windows.md
 `;
 
+/** The Windows download's file name carries the gateway version, e.g. opendental-gateway-windows-0.8.0.zip. */
+function gatewayZipName() {
+  return `opendental-gateway-windows-${JSON.parse(read("package.json")).version}.zip`;
+}
+
 /** Windows download: Setup.cmd + README.txt at the top, the gateway under app/. */
 function buildGatewayWindows() {
   const crlf = (b) => Buffer.from(b.toString("utf8").replace(/\r?\n/g, "\r\n"), "utf8");
@@ -177,10 +182,12 @@ if (require.main === module) {
   const plug = buildPlugin();
   fs.writeFileSync(path.join(DIST, "opendental.plugin"), plug);
   const win = buildGatewayWindows().data;
-  fs.writeFileSync(path.join(DIST, "opendental-gateway-windows.zip"), win);
+  const winName = gatewayZipName();
+  for (const old of fs.readdirSync(DIST)) if (/^opendental-gateway-windows.*\.zip$/.test(old)) fs.rmSync(path.join(DIST, old));
+  fs.writeFileSync(path.join(DIST, winName), win);
   console.log(`dist/opendental.mcpb    ${(ext.length / 1024).toFixed(1)} KB`);
   console.log(`dist/opendental.plugin  ${(plug.length / 1024).toFixed(1)} KB`);
-  console.log(`dist/opendental-gateway-windows.zip  ${(win.length / 1024).toFixed(1)} KB`);
+  console.log(`dist/${winName}  ${(win.length / 1024).toFixed(1)} KB`);
 }
 
-module.exports = { zip, crc32, buildExtension, buildPlugin, buildGatewayWindows };
+module.exports = { zip, crc32, buildExtension, buildPlugin, buildGatewayWindows, gatewayZipName };

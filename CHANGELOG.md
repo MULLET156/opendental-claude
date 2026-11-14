@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.0 — 2026-11-14
+
+Fixes and gaps found in live testing.
+
+- **Fix:** `od_update_planned_procedure` didn't change priority. Open Dental's procedure update ignores the text `priority`/`dxName` fields; the connector now resolves priority and diagnosis names to their definition numbers on every create and update. `"none"` clears a priority.
+- **Every write is read back.** Procedures, plan items, tooth markings, lab cases, appointments and commlogs are re-read after saving; if Open Dental didn't apply a change, the tool fails with "did not apply … Treat this change as NOT made" instead of reporting success.
+- **Treatment-plan order:** new `od_set_treatment_plan_priorities` sets plan-item priorities for groups of procedures in one confirmed call (validated before any change). `od_add_to_treatment_plan` updates the priority of procedures already on the plan instead of failing. Procedure priority and plan-item priority are kept in sync by default.
+- **Lab cases:** `od_update_lab_case_status` takes `overwrite: true` to replace a recorded date; `od_update_lab_case` can unlink an appointment or planned appointment; `od_mark_lab_cases_received` takes `received_date` and `overwrite_received` to re-date cases (preview shows old and new dates). New report `lab_cases_received_on_appointment_date`.
+- **Schedule:** `od_find_open_slots` removes or trims slots that overlap blockouts and lists them; `od_break_appointment` takes `break_type` (Missed → D9986, Cancelled → D9987, when set up in Appts Preferences) and only breaks Scheduled appointments; reschedule notes the placeholder-time quirk.
+- Docs: Open Dental API behaviors found in live testing (priority on update, broken-appointment adjustment, blockouts, placeholder times, `REPEAT()`).
+
 ## 0.6.0 — 2026-11-14
 
 - **Procedure status** (needs **Allow chart changes**):

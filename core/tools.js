@@ -29,6 +29,71 @@ function dateParams(start, end) {
   return { dateStart: start, dateEnd: end };
 }
 
+// ------------------------------------------------------------------ blockouts
+
+const toMin = (hms) => {
+  const m = String(hms || "").match(/(\d{1,2}):(\d{2})/);
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+};
+const fromMin = (date, mins) => `${date} ${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}:00`;
+
+function blockoutOps(b) {
+  const ops = b.operatories ?? b.Operatories ?? b.Ops;
+  if (Array.isArray(ops)) return ops.map((o) => Number(typeof o === "object" ? o.OperatoryNum : o)).filter(Boolean);
+  if (typeof ops === "string" && ops.trim()) return ops.split(",").map((x) => Number(x.trim())).filter(Boolean);
+  return []; // none listed: treat as every operatory
+}
+
+/**
+ * Remove blockout time (lunch, meetings) from open slots. A slot partly covered is trimmed;
+ * one fully covered is dropped. Returns kept slots and what was removed.
+ */
+function subtractBlockouts(slots, blockouts, minLength) {
+  const kept = [];
+  const removed = [];
+  for (const slot of slots) {
+    const start = String(slot.DateTimeStart || "");
+    const end = String(slot.DateTimeEnd || "");
+    const date = start.slice(0, 10);
+    const s0 = toMin(start.slice(11));
+    const e0 = toMin(end.slice(11));
+    if (!date || s0 === null || e0 === null || end.slice(0, 10) !== date) {
+      kept.push(slot);
+      continue;
+    }
+    const op = Number(slot.OpNum ?? slot.Op ?? 0);
+    const covering = blockouts
+      .filter((b) => String(b.SchedDate || "").slice(0, 10) === date)
+      .filter((b) => {
+        const ops = blockoutOps(b);
+        return !ops.length || !op || ops.includes(op);
+      })
+      .map((b) => ({ s: toMin(b.StartTime), e: toMin(b.StopTime), b }))
+      .filter((x) => x.s !== null && x.e !== null && x.s < e0 && x.e > s0)
+      .sort((x, y) => x.s - y.s);
+    if (!covering.length) {
+      kept.push(slot);
+      continue;
+    }
+    let pieces = [[s0, e0]];
+    for (const c of covering) {
+      pieces = pieces.flatMap(([ps, pe]) => [
+        ...(c.s > ps ? [[ps, Math.min(pe, c.s)]] : []),
+        ...(c.e < pe ? [[Math.max(ps, c.e), pe]] : []),
+      ]).filter(([ps, pe]) => pe > ps);
+    }
+    const min = Number(minLength) || 1;
+    const good = pieces.filter(([ps, pe]) => pe - ps >= min);
+    for (const [ps, pe] of good) kept.push({ ...slot, DateTimeStart: fromMin(date, ps), DateTimeEnd: fromMin(date, pe) });
+    removed.push({
+      slot: `${start} - ${end.slice(11)}${op ? ` op ${op}` : ""}`,
+      blockouts: covering.map((c) => `${c.b.StartTime}-${c.b.StopTime}${c.b.Note ? ` (${c.b.Note})` : ""}`),
+      result: good.length ? "trimmed" : "removed",
+    });
+  }
+  return { kept, removed };
+}
+
 /**
  * @param {ReturnType<import('./odclient').createClient>} od
  * @param {{allowWrites: boolean}} opts
@@ -42,6 +107,20 @@ function buildTools(od, { allowWrites = false, allowChartChanges = false } = {})
       );
     }
   };
+
+  /** Read an appointment back and confirm the fields took effect. */
+  async function verifyAppt(aptNum, expected) {
+    const ap = await od.request("GET", `/appointments/${aptNum}`);
+    const bad = [];
+    for (const [k, want] of Object.entries(expected)) {
+      if (want === undefined) continue;
+      const got = ap && ap[k];
+      const ok = typeof want === "number" ? Number(got) === want : String(got ?? "").trim() === String(want).trim();
+      if (!ok) bad.push(`${k} should be ${want} but Open Dental has ${got ?? "nothing"}`);
+    }
+    if (bad.length) throw new ODError(`Open Dental accepted the change to appointment ${aptNum} but did not apply it: ${bad.join("; ")}. Treat this change as NOT made.`, { code: "not_applied" });
+    return ap;
+  }
 
   return [
     // -------------------------------------------------------------- reads
@@ -154,7 +233,7 @@ function buildTools(od, { allowWrites = false, allowChartChanges = false } = {})
       name: "od_find_open_slots",
       annotations: READ,
       description:
-        "Find open schedule slots (honoring provider schedules across operatories). Dates yyyy-MM-dd inclusive. length_minutes drops shorter slots.",
+        "Find open schedule slots (honoring provider schedules across operatories). Dates yyyy-MM-dd inclusive. length_minutes drops shorter slots. Open Dental's slot search ignores blockouts (lunch, meetings), so this tool removes or trims slots that overlap a blockout and lists what it removed; set include_blockouts=true to see raw slots.",
       inputSchema: obj(
         {
           date_start: str("yyyy-MM-dd"),
@@ -163,21 +242,33 @@ function buildTools(od, { allowWrites = false, allowChartChanges = false } = {})
           op_num: int("OperatoryNum."),
           length_minutes: int("Minimum slot length in minutes."),
           clinic_num: int("Optional ClinicNum filter."),
+          include_blockouts: bool("Return Open Dental's raw slots without removing blockout time. Default false."),
         },
         ["date_start"]
       ),
       run: async (a) => {
         checkDate("date_start", a.date_start, { required: true });
         checkDate("date_end", a.date_end);
-        return outPage(
-          await od.getAll("/appointments/Slots", {
-            ...dateParams(a.date_start, a.date_end),
-            ProvNum: recordId("prov_num", a.prov_num, { required: false }),
-            OpNum: recordId("op_num", a.op_num, { required: false }),
-            lengthMinutes: a.length_minutes,
-            ClinicNum: recordId("clinic_num", a.clinic_num, { required: false }),
-          })
-        );
+        const range = dateParams(a.date_start, a.date_end);
+        const page = await od.getAll("/appointments/Slots", {
+          ...range,
+          ProvNum: recordId("prov_num", a.prov_num, { required: false }),
+          OpNum: recordId("op_num", a.op_num, { required: false }),
+          lengthMinutes: a.length_minutes,
+          ClinicNum: recordId("clinic_num", a.clinic_num, { required: false }),
+        });
+        if (a.include_blockouts) return outPage(page);
+        let blockouts;
+        try {
+          blockouts = (await od.getAll("/schedules", { ...range, SchedType: "Blockout" })).rows;
+        } catch (e) {
+          return { ...outPage(page), warning: `Couldn't read blockouts (${e.message}); some slots may fall inside lunch or other blockouts. Check before booking.` };
+        }
+        const { kept, removed } = subtractBlockouts(page.rows, blockouts, a.length_minutes);
+        return out(kept, {
+          ...(page.truncated ? { truncated: "Row limit reached; narrow the filters to see the rest." } : {}),
+          ...(removed.length ? { removed_for_blockouts: removed } : {}),
+        });
       },
     },
     {
@@ -214,7 +305,7 @@ function buildTools(od, { allowWrites = false, allowChartChanges = false } = {})
       name: "od_run_query",
       annotations: READ,
       description:
-        "Run a custom read-only SQL query against the Open Dental database (Open Dental also screens it as read-only and records it in the audit trail). Use only when no built-in report fits. Select only needed columns; never select SSN.",
+        "Run a custom read-only SQL query against the Open Dental database (Open Dental also screens it as read-only and records it in the audit trail). Use only when no built-in report fits. Select only needed columns; never select SSN. Open Dental's query filter rejects some functions (e.g. REPEAT()); rewrite without them.",
       inputSchema: obj({ sql: str("One read-only SELECT statement."), max_rows: int("Maximum rows. Default 500.") }, ["sql"]),
       run: async (a) => outPage(await od.shortQuery(a.sql, { limit: a.max_rows })),
     },
@@ -251,7 +342,13 @@ function buildTools(od, { allowWrites = false, allowChartChanges = false } = {})
           checkDateTime("comm_date_time", a.comm_date_time);
           body.CommDateTime = a.comm_date_time;
         }
-        return out(await od.request("POST", "/commlogs", { body }));
+        const created = await od.request("POST", "/commlogs", { body });
+        const num = Number(created && created.CommlogNum);
+        const list = await od.request("GET", "/commlogs", { params: { PatNum: body.PatNum } });
+        if (!num || !(Array.isArray(list) && list.some((c) => Number(c.CommlogNum) === num))) {
+          throw new ODError("Open Dental accepted the commlog but it isn't in the patient's communication log. Check before retrying.", { code: "not_applied" });
+        }
+        return out(created, { verified: "Read back from Open Dental after saving." });
       },
     },
     {
@@ -282,7 +379,11 @@ function buildTools(od, { allowWrites = false, allowChartChanges = false } = {})
         if (a.pattern) body.Pattern = a.pattern;
         if (a.note) body.Note = String(a.note);
         if (a.is_new_patient != null) body.IsNewPatient = a.is_new_patient ? "true" : "false";
-        return out(await od.request("POST", "/appointments", { body }));
+        const created = await od.request("POST", "/appointments", { body });
+        const aptNum = Number(created && created.AptNum);
+        if (!aptNum) throw new ODError("Open Dental did not return the new appointment's number; check the schedule before retrying.", { code: "not_applied" });
+        const after = await verifyAppt(aptNum, { AptDateTime: body.AptDateTime, Op: body.Op, PatNum: body.PatNum });
+        return out(after, { verified: "Read back from Open Dental after saving." });
       },
     },
     {
@@ -313,7 +414,13 @@ function buildTools(od, { allowWrites = false, allowChartChanges = false } = {})
           body.Pattern = a.pattern;
         }
         if (!Object.keys(body).length) throw new ODError("Nothing to change.", { code: "bad_input" });
-        return out(await od.request("PUT", `/appointments/${recordId("apt_num", a.apt_num)}`, { body }));
+        const aptNum = recordId("apt_num", a.apt_num);
+        await od.request("PUT", `/appointments/${aptNum}`, { body });
+        const after = await verifyAppt(aptNum, body);
+        return out(after, {
+          verified: "Read back from Open Dental after saving.",
+          note: "Open Dental keeps the old date on the arrived/seated/dismissed placeholder times after a move; that is cosmetic.",
+        });
       },
     },
     {
@@ -323,7 +430,15 @@ function buildTools(od, { allowWrites = false, allowChartChanges = false } = {})
       inputSchema: obj({ apt_num: int("AptNum"), note: str("Text to append.") }, ["apt_num", "note"]),
       run: async (a) => {
         needWrites();
-        return out(await od.request("PUT", `/appointments/${recordId("apt_num", a.apt_num)}/Note`, { body: { Note: String(a.note || "") } }));
+        const aptNum = recordId("apt_num", a.apt_num);
+        const text = String(a.note || "");
+        if (!text.trim()) throw new ODError("note is required.", { code: "bad_input" });
+        await od.request("PUT", `/appointments/${aptNum}/Note`, { body: { Note: text } });
+        const after = await od.request("GET", `/appointments/${aptNum}`);
+        if (!String((after && after.Note) || "").includes(text.trim())) {
+          throw new ODError(`Open Dental accepted the note for appointment ${aptNum} but it isn't on the appointment. Treat this change as NOT made.`, { code: "not_applied" });
+        }
+        return out(after, { verified: "Read back from Open Dental after saving." });
       },
     },
     {
@@ -334,25 +449,57 @@ function buildTools(od, { allowWrites = false, allowChartChanges = false } = {})
       inputSchema: obj({ apt_num: int("AptNum"), confirm_val: str("Confirmation status name.") }, ["apt_num", "confirm_val"]),
       run: async (a) => {
         needWrites();
-        return out(
-          await od.request("PUT", `/appointments/${recordId("apt_num", a.apt_num)}/Confirm`, { body: { confirmVal: String(a.confirm_val || "") } })
-        );
+        const aptNum = recordId("apt_num", a.apt_num);
+        const val = String(a.confirm_val || "").trim();
+        if (!val) throw new ODError("confirm_val is required.", { code: "bad_input" });
+        const before = await od.request("GET", `/appointments/${aptNum}`);
+        await od.request("PUT", `/appointments/${aptNum}/Confirm`, { body: { confirmVal: val } });
+        const after = await od.request("GET", `/appointments/${aptNum}`);
+        const label = String(after.confirmed ?? after.ConfirmedName ?? "").trim().toLowerCase();
+        const changed = String(after.Confirmed) !== String(before.Confirmed);
+        if (label ? label !== val.toLowerCase() : !changed) {
+          throw new ODError(`Open Dental accepted the confirmation for appointment ${aptNum} but it still shows "${after.confirmed ?? after.Confirmed}". Treat this change as NOT made.`, { code: "not_applied" });
+        }
+        return out(after, { verified: "Read back from Open Dental after saving." });
       },
     },
     {
       name: "od_break_appointment",
       annotations: WRITE_DESTRUCTIVE,
       description:
-        "CHANGE. Mark an appointment broken (no-show / late cancel), removing it from the schedule and optionally adding it to the Unscheduled List. State exactly which appointment and get a clear yes first.",
-      inputSchema: obj({ apt_num: int("AptNum"), send_to_unscheduled_list: bool("Default true.") }, ["apt_num"]),
+        "CHANGE. Mark an appointment broken (no-show / late cancel), removing it from the schedule and optionally adding it to the Unscheduled List. break_type 'Missed' adds the office's missed-appointment procedure (D9986) and 'Cancelled' the short-notice cancellation procedure (D9987), if the office has a broken appointment procedure set in Appts Preferences. Open Dental's API never posts the broken-appointment adjustment; tell the user to add it in Open Dental if the office uses one. State exactly which appointment and get a clear yes first.",
+      inputSchema: obj(
+        {
+          apt_num: int("AptNum"),
+          send_to_unscheduled_list: bool("Default true."),
+          break_type: { type: "string", enum: ["Missed", "Cancelled"], description: "Optional: also add the D9986 (Missed) or D9987 (Cancelled) procedure." },
+        },
+        ["apt_num"]
+      ),
       run: async (a) => {
         needWrites();
+        const aptNum = recordId("apt_num", a.apt_num);
         const send = a.send_to_unscheduled_list ?? true;
-        return out(
-          await od.request("PUT", `/appointments/${recordId("apt_num", a.apt_num)}/Break`, {
-            body: { sendToUnscheduledList: send ? "true" : "false" },
-          })
-        );
+        const body = { sendToUnscheduledList: send ? "true" : "false" };
+        if (a.break_type) {
+          if (!["Missed", "Cancelled"].includes(a.break_type)) throw new ODError("break_type must be Missed or Cancelled.", { code: "bad_input" });
+          body.breakType = a.break_type;
+        }
+        const before = await od.request("GET", `/appointments/${aptNum}`);
+        if (String(before.AptStatus) !== "Scheduled" && Number(before.AptStatus) !== 1) {
+          throw new ODError(`Appointment ${aptNum} is ${before.AptStatus}; only Scheduled appointments can be broken. Nothing was changed.`, { code: "bad_input" });
+        }
+        await od.request("PUT", `/appointments/${aptNum}/Break`, { body });
+        const after = await od.request("GET", `/appointments/${aptNum}`);
+        const status = String(after.AptStatus);
+        const ok = ["Broken", "UnschedList", "5", "3"].includes(status) || (!send && a.break_type && status === "Scheduled");
+        if (!ok) throw new ODError(`Open Dental accepted the break for appointment ${aptNum} but it still shows ${status}. Treat this change as NOT made.`, { code: "not_applied" });
+        return out(after, {
+          verified: "Read back from Open Dental after saving.",
+          reminder: a.break_type
+            ? "The broken-appointment procedure was requested; Open Dental adds it only if set up in Appts Preferences. The API never posts the broken-appointment adjustment."
+            : "Open Dental added its automatic commlog (if turned on) but not the office's broken-appointment procedure or adjustment; add those in Open Dental if the office uses them.",
+        });
       },
     },
   ];

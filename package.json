@@ -1,6 +1,6 @@
 {
   "name": "opendental-claude",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Connect Open Dental to Claude (desktop extension + skills) and to your own apps (API gateway). No dependencies.",
   "license": "MIT",
   "author": "Ryan Millet",

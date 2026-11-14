@@ -61,8 +61,8 @@ test("connector: handshake, tool list, reads, guards", async () => {
     assert.equal(r[0].result.protocolVersion, "2025-06-18");
     assert.equal(r[0].result.serverInfo.name, "opendental");
     const tools = r[1].result.tools;
-    assert.equal(tools.length, 44);
-    assert.equal(tools.filter((t) => t.annotations.readOnlyHint === false).length, 21);
+    assert.equal(tools.length, 45);
+    assert.equal(tools.filter((t) => t.annotations.readOnlyHint === false).length, 22);
     assert.equal(text(r[2]).results.writes_enabled, false);
     const s = text(r[3]);
     assert.equal(s.count, 120);
@@ -94,7 +94,7 @@ test("connector: changes go through when allowed, with exact bodies", async () =
     const env = { OD_BASE_URL: od.url, OD_DEVELOPER_KEY: "dev1", OD_CUSTOMER_KEY: "cust1", OD_ALLOW_WRITES: "true" };
     const r = await session(ENTRY, env, [
       call(1, "od_create_appointment", { pat_num: 1, apt_date_time: "2026-11-20 09:00:00", op: 2, prov_num: 1, pattern: "XXXXXX" }),
-      call(2, "od_break_appointment", { apt_num: 9 }),
+      call(2, "od_break_appointment", { apt_num: 52, break_type: "Missed" }),
       call(3, "od_add_commlog", { pat_num: 1, note: "Pt called to reschedule", mode: "Phone", sent_or_received: "Received" }),
       call(4, "od_create_appointment", { pat_num: 1, apt_date_time: "2026-11-20 09:00:00", op: 2, pattern: "XX1" }),
     ]);
@@ -104,8 +104,12 @@ test("connector: changes go through when allowed, with exact bodies", async () =
     assert.ok(r[4].result.isError);
     const post = od.requests.find((q) => q.method === "POST" && q.path.endsWith("/appointments"));
     assert.deepEqual(post.body, { PatNum: 1, AptDateTime: "2026-11-20 09:00:00", Op: 2, ProvNum: 1, Pattern: "XXXXXX" });
-    const brk = od.requests.find((q) => q.path.endsWith("/appointments/9/Break"));
-    assert.deepEqual(brk.body, { sendToUnscheduledList: "true" });
+    const brk = od.requests.find((q) => q.path.endsWith("/appointments/52/Break"));
+    assert.deepEqual(brk.body, { sendToUnscheduledList: "true", breakType: "Missed" });
+    assert.equal(od.state.appts[52].AptStatus, "UnschedList");
+    assert.match(text(r[2]).reminder, /adjustment/);
+    assert.equal(text(r[1]).verified, "Read back from Open Dental after saving.");
+    assert.equal(text(r[3]).verified, "Read back from Open Dental after saving.");
     const cl = od.requests.find((q) => q.path.endsWith("/commlogs"));
     assert.deepEqual(cl.body, { PatNum: 1, Note: "Pt called to reschedule", Mode_: "Phone", SentOrReceived: "Received" });
   } finally {
@@ -118,7 +122,7 @@ test("connector: bad settings are reported, not a crash", async () => {
     { id: 1, method: "tools/list" },
     call(2, "od_connection_check"),
   ]);
-  assert.equal(r[1].result.tools.length, 44);
+  assert.equal(r[1].result.tools.length, 45);
   assert.match(text(r[2]).error, /Plain http/);
 });
 

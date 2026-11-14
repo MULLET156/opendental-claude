@@ -7,6 +7,21 @@ function startFakeOD({ port = 0, onRequest } = {}) {
   const requests = [];
   const state = {
     failNext: [], // e.g. [{status:429, retryAfter:"0"}]
+    commlogs: [],
+    slots: [
+      { DateTimeStart: "2026-11-16 08:00:00", DateTimeEnd: "2026-11-16 09:00:00", ProvNum: 1, OpNum: 3 },
+      { DateTimeStart: "2026-11-16 11:00:00", DateTimeEnd: "2026-11-16 14:00:00", ProvNum: 1, OpNum: 3 },
+      { DateTimeStart: "2026-11-16 12:30:00", DateTimeEnd: "2026-11-16 13:00:00", ProvNum: 1, OpNum: 4 },
+      { DateTimeStart: "2026-11-16 12:30:00", DateTimeEnd: "2026-11-16 13:00:00", ProvNum: 1, OpNum: 5 },
+    ],
+    blockouts: [{ ScheduleNum: 1, SchedDate: "2026-11-16", StartTime: "12:00:00", StopTime: "13:00:00", SchedType: "Blockout", Note: "Lunch", operatories: "3,4" }],
+    nextProc: 200,
+    nextAttach: 70,
+    nextTooth: 400,
+    attaches: [
+      { TreatPlanAttachNum: 60, TreatPlanNum: 9, ProcNum: 103, Priority: 501 },
+      { TreatPlanAttachNum: 61, TreatPlanNum: 9, ProcNum: 105, Priority: 0 },
+    ],
     toothinitials: [
       { ToothInitialNum: 301, PatNum: 1, ToothNum: "1", InitialType: "Missing" },
       { ToothInitialNum: 302, PatNum: 1, ToothNum: "4", InitialType: "Primary" },
@@ -21,6 +36,8 @@ function startFakeOD({ port = 0, onRequest } = {}) {
       5: { LabCaseNum: 5, PatNum: 1, AptNum: 50, DateTimeSent: "2019-03-01 09:00:00", DateTimeRecd: "2019-03-10 10:00:00" },
       6: { LabCaseNum: 6, PatNum: 1, AptNum: 0, DateTimeSent: "2019-03-01 09:00:00", DateTimeRecd: "0001-01-01 00:00:00" },
       7: { LabCaseNum: 7, PatNum: 2, AptNum: 53, DateTimeSent: "2020-01-01 09:00:00", DateTimeRecd: "0001-01-01 00:00:00" },
+      8: { LabCaseNum: 8, PatNum: 3, AptNum: 50, PlannedAptNum: 0, DateTimeSent: "2018-01-01 09:00:00", DateTimeRecd: "0001-01-01 00:00:00" },
+      9: { LabCaseNum: 9, PatNum: 1, AptNum: 50, DateTimeSent: "2019-03-01 09:00:00", DateTimeRecd: "2019-03-15 10:30:00" },
     },
     appts: {
       50: { AptNum: 50, PatNum: 1, AptStatus: "Complete", AptDateTime: "2019-03-15 10:30:00" },
@@ -75,12 +92,34 @@ function startFakeOD({ port = 0, onRequest } = {}) {
       if (/^\/patients\/\d+$/.test(p)) return json(200, { PatNum: Number(p.split("/")[2]), LName: "Smith", SSN: "999", Email: "a@b.c" });
       if (p === "/queries/ShortQuery") return json(200, [{ ProvNum: 1, GrossProduction: 1234.5 }]);
       if (p === "/appointments" && req.method === "GET") return json(200, [{ AptNum: 9, PatNum: 1, AptDateTime: "2026-11-13 08:00:00" }]);
-      if (p === "/appointments" && req.method === "POST") return json(201, { AptNum: 77, ...rec.body });
-      if (p === "/commlogs" && req.method === "POST") return json(201, { CommlogNum: 5, ...rec.body });
-      if (/^\/appointments\/\d+(\/\w+)?$/.test(p) && req.method === "PUT") {
-        res.writeHead(200);
-        return res.end();
+      if (p === "/appointments" && req.method === "POST") {
+        const ap = { AptNum: 77, AptStatus: "Scheduled", Note: "", Confirmed: 19, confirmed: "Unconfirmed", ...rec.body };
+        state.appts[77] = ap;
+        return json(201, ap);
       }
+      if (p === "/commlogs" && req.method === "POST") {
+        const c = { CommlogNum: 5, ...rec.body };
+        state.commlogs.push(c);
+        return json(201, c);
+      }
+      if (p === "/commlogs" && req.method === "GET") return json(200, state.commlogs.filter((c) => String(c.PatNum) === rec.query.PatNum));
+      {
+        const am = p.match(/^\/appointments\/(\d+)(?:\/(\w+))?$/);
+        if (am && req.method === "PUT") {
+          const ap = state.appts[am[1]];
+          if (!ap) return json(404, { message: "Appointment not found" });
+          if (!state.ignoreApptPut) {
+            if (!am[2]) Object.assign(ap, rec.body);
+            else if (am[2] === "Note") ap.Note = (ap.Note ? ap.Note + "\r\n" : "") + rec.body.Note;
+            else if (am[2] === "Confirm") ap.confirmed = rec.body.confirmVal;
+            else if (am[2] === "Break") ap.AptStatus = rec.body.sendToUnscheduledList === "true" ? "UnschedList" : "Broken";
+          }
+          res.writeHead(200);
+          return res.end();
+        }
+      }
+      if (p === "/schedules") return json(200, state.blockouts.filter((b) => !rec.query.SchedType || rec.query.SchedType === "Blockout"));
+      if (p === "/appointments/Slots") return json(200, state.slots);
       // ---- clinical
       const procs = state.procs;
       let m;
@@ -88,13 +127,26 @@ function startFakeOD({ port = 0, onRequest } = {}) {
         const pr = procs[m[1]];
         if (!pr) return json(404, { message: "Procedure not found" });
         if (req.method === "GET") return json(200, pr);
-        if (req.method === "PUT") return json(200, { ...pr, ...rec.body });
-        if (req.method === "DELETE") return json(200, { ok: true });
+        if (req.method === "PUT") {
+          // Like Open Dental: PUT applies Priority/Dx DefNums but silently ignores the POST-only text names.
+          const { priority, dxName, ...apply } = rec.body || {};
+          if (state.ignoreProcPut) return json(200, pr);
+          Object.assign(pr, apply);
+          return json(200, pr);
+        }
+        if (req.method === "DELETE") {
+          delete procs[m[1]];
+          return json(200, { ok: true });
+        }
       }
       if (p === "/procedurelogs" && req.method === "GET") {
         return json(200, Object.values(procs).filter((x) => String(x.PatNum) === rec.query.PatNum && (!rec.query.ProcStatus || x.ProcStatus === rec.query.ProcStatus)));
       }
-      if (p === "/procedurelogs" && req.method === "POST") return json(201, { ProcNum: 200, ...rec.body });
+      if (p === "/procedurelogs" && req.method === "POST") {
+        const ProcNum = state.nextProc++;
+        procs[ProcNum] = { ProcNum, Priority: 0, ...rec.body };
+        return json(201, procs[ProcNum]);
+      }
       if (p === "/procedurelogs/GroupNote" && req.method === "POST") return json(201, { ProcNum: 300, procCode: "~GRP~", ...rec.body });
       if (p === "/procnotes") return json(req.method === "POST" ? 201 : 200, req.method === "POST" ? { ProcNoteNum: 7, ...rec.body } : [{ ProcNoteNum: 6, PatNum: 1, ProcNum: 101, Note: "Prior note", isSigned: "true" }]);
       if ((m = p.match(/^\/chartmodules\/(\d+)\/(ProgNotes|PatientInfo)$/))) {
@@ -105,7 +157,18 @@ function startFakeOD({ port = 0, onRequest } = {}) {
       }
       if (p === "/treatplans" && req.method === "POST") return json(201, { TreatPlanNum: 11, TPStatus: "Inactive", ...rec.body });
       if ((m = p.match(/^\/treatplans\/(\d+)$/)) && req.method === "PUT") return json(200, { ok: true });
-      if (p === "/treatplanattaches") return json(req.method === "POST" ? 201 : 200, req.method === "POST" ? { TreatPlanAttachNum: 70, ...rec.body } : [{ ProcNum: 103, Priority: 501 }]);
+      if (p === "/treatplanattaches" && req.method === "GET") return json(200, state.attaches.filter((x) => String(x.TreatPlanNum) === rec.query.TreatPlanNum));
+      if (p === "/treatplanattaches" && req.method === "POST") {
+        const at = { TreatPlanAttachNum: state.nextAttach++, Priority: 0, ...rec.body };
+        state.attaches.push(at);
+        return json(201, at);
+      }
+      if ((m = p.match(/^\/treatplanattaches\/(\d+)$/)) && req.method === "PUT") {
+        const at = state.attaches.find((x) => String(x.TreatPlanAttachNum) === m[1]);
+        if (!at) return json(404, { message: "TreatPlanAttach not found" });
+        if (!state.ignoreAttachPut) at.Priority = rec.body.Priority;
+        return json(200, at);
+      }
       if (p === "/proctps") return json(200, [{ ProcTPNum: 1, ProcCode: "D2740" }]);
       if (p === "/procedurecodes") {
         return json(200, [
@@ -127,7 +190,10 @@ function startFakeOD({ port = 0, onRequest } = {}) {
         const lc = labcases[m[1]];
         if (!lc) return json(404, { message: "LabCase not found" });
         if (req.method === "GET") return json(200, lc);
-        if (req.method === "PUT") return json(200, { ...lc, ...rec.body });
+        if (req.method === "PUT") {
+          if (!state.ignoreLabPut) Object.assign(lc, rec.body);
+          return json(200, lc);
+        }
       }
       if (p === "/labcases" && req.method === "GET") return json(200, Object.values(labcases).filter((x) => !rec.query.PatNum || String(x.PatNum) === rec.query.PatNum));
       if (p === "/labcases" && req.method === "POST") return json(201, { LabCaseNum: 900, ...rec.body });
@@ -137,8 +203,15 @@ function startFakeOD({ port = 0, onRequest } = {}) {
       }
       // ---- tooth chart
       if (p === "/toothinitials" && req.method === "GET") return json(200, state.toothinitials.filter((x) => String(x.PatNum) === rec.query.PatNum));
-      if (p === "/toothinitials" && req.method === "POST") return json(201, { ToothInitialNum: 400, ...rec.body });
-      if ((m = p.match(/^\/toothinitials\/(\d+)$/)) && req.method === "DELETE") return json(200, { ok: true });
+      if (p === "/toothinitials" && req.method === "POST") {
+        const ti = { ToothInitialNum: state.nextTooth++, ...rec.body };
+        if (!state.ignoreToothPost) state.toothinitials.push(ti);
+        return json(201, ti);
+      }
+      if ((m = p.match(/^\/toothinitials\/(\d+)$/)) && req.method === "DELETE") {
+        state.toothinitials = state.toothinitials.filter((x) => String(x.ToothInitialNum) !== m[1]);
+        return json(200, { ok: true });
+      }
       if (p === "/boom") return json(500, { message: `server error with key ${req.headers.authorization}` });
       json(404, { message: "not found" });
     });

@@ -19,3 +19,11 @@ jobs:
           node-version: ${{ matrix.node }}
       - run: npm test
       - run: npm run build
+      - name: Attach installable files to this run
+        if: matrix.os == 'ubuntu-latest' && matrix.node == 22
+        uses: actions/upload-artifact@v4
+        with:
+          name: opendental-install-files
+          path: |
+            dist/opendental.mcpb
+            dist/opendental.plugin

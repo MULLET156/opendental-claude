@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.0 — 2026-11-14
+
+- **Lab cases** in the Claude connector (7 new tools): list labs with turnaround times; a patient's or appointment's lab cases; an open-case board with overdue and seat-risk flags; create a lab case (optionally linked to the seat appointment, due date from a lab turnaround, mark sent); mark sent, received or checked in order; update due date, instructions, seat appointment, lab, fee or invoice. Changes use the **Allow schedule changes** setting. Nothing deletes a lab case.
+- **Lab case cleanup** (`od_mark_lab_cases_received`): marks old cases received using their linked appointment's date, only when that appointment is Complete and the case isn't already received, with an optional cutoff date; up to 50 per call; preview by default; stops on Open Dental errors.
+- New reports: `lab_cases_open`, `lab_turnaround`, `lab_cases_unreceived_completed` (also available to gateway apps).
+- New **od-lab** skill. The od-schedule skill now notes two Open Dental behaviors found in live testing: API breaks don't add the office's broken-appointment procedure or adjustment, and slot search can include blockouts.
+
 ## 0.4.0 — 2026-11-14
 
 - **Chart notes and treatment planning** in the Claude connector (15 new tools):

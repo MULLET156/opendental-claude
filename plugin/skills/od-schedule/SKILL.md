@@ -19,6 +19,7 @@ Useful summaries: count of scheduled patients, new patients (`IsNewPatient`), un
 
 - Call `od_find_open_slots` with the date range and, when known, `prov_num`, `op_num`, and `length_minutes`.
 - Slots already account for a provider working across several operatories.
+- Open Dental's slot search can return times inside blockouts (lunch, meetings). Before offering or booking a slot, check it against that day's schedule with `od_get_appointments` and the office's known blockouts, and tell the user to confirm the time in Open Dental.
 - For "who could fill this opening", pair the slot with `od_get_asap_list`.
 
 ## Changing appointments (writes)
@@ -34,5 +35,6 @@ Before every write:
 Rules:
 - Book only into slots `od_find_open_slots` shows as open, unless the user explicitly says to double-book.
 - Break an appointment only when the user says the patient no-showed or cancelled; ask whether to send it to the Unscheduled List.
+- Breaking through the API adds Open Dental's automatic commlog but **not** the office's broken-appointment procedure or adjustment. After breaking, tell the user to add those in Open Dental if the office uses them.
 - Log what happened with `od_add_commlog` when the user mentions a call or text (e.g. "Pt called to reschedule"), after confirming the note text.
 - Never change appointments in bulk from a single instruction; walk through them one at a time.

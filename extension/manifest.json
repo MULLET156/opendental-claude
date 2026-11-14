@@ -2,8 +2,8 @@
   "manifest_version": "0.3",
   "name": "opendental",
   "display_name": "Open Dental",
-  "version": "0.4.0",
-  "description": "Connect Claude to Open Dental: schedule, patients, chart notes, treatment planning, A/R, claims and production reports. Independent project, not affiliated with Open Dental Software.",
+  "version": "0.5.0",
+  "description": "Connect Claude to Open Dental: schedule, patients, chart notes, treatment planning, lab cases, A/R, claims and production reports. Independent project, not affiliated with Open Dental Software.",
   "long_description": "Reads your Open Dental database through the official Open Dental API (cloud, API Service or Local API). Read-only unless you turn on \"Allow changes\", which lets Claude book, move, confirm or break appointments and add commlog and appointment notes after you approve each one. SSNs are removed from every result, and report queries are limited to read-only SQL.",
   "author": {
     "name": "Ryan Millet"
@@ -166,6 +166,34 @@
     {
       "name": "od_update_treatment_plan",
       "description": "Rename a treatment plan (needs Allow chart changes)"
+    },
+    {
+      "name": "od_list_labs",
+      "description": "List labs and turnaround times"
+    },
+    {
+      "name": "od_get_lab_cases",
+      "description": "List lab cases for a patient, appointment or lab"
+    },
+    {
+      "name": "od_get_open_lab_cases",
+      "description": "Lab case board: open, overdue, seat risk"
+    },
+    {
+      "name": "od_create_lab_case",
+      "description": "Create a lab case (needs Allow schedule changes)"
+    },
+    {
+      "name": "od_update_lab_case_status",
+      "description": "Mark a lab case sent, received or checked (needs Allow schedule changes)"
+    },
+    {
+      "name": "od_update_lab_case",
+      "description": "Change a lab case (needs Allow schedule changes)"
+    },
+    {
+      "name": "od_mark_lab_cases_received",
+      "description": "Clean up old lab cases left unreceived (needs Allow schedule changes)"
     }
   ],
   "user_config": {
@@ -200,7 +228,7 @@
     "allow_writes": {
       "type": "boolean",
       "title": "Allow schedule changes",
-      "description": "Let Claude book, move, confirm or break appointments and add commlog/appointment notes. Claude asks before each change.",
+      "description": "Let Claude book, move, confirm or break appointments, add commlog/appointment notes, and create or update lab cases. Claude asks before each change.",
       "default": false,
       "required": false
     },

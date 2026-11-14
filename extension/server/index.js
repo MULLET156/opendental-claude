@@ -18,6 +18,7 @@ function load(mod) {
 const { createClient } = load("odclient");
 const { buildTools } = load("tools");
 const { buildClinicalTools } = load("clinical-tools");
+const { buildLabTools } = load("lab-tools");
 const { createMcpHandler, serveStdio } = load("mcp-stdio");
 const { version } = require("../manifest.json");
 
@@ -47,7 +48,7 @@ try {
 const allowWrites = setting("OD_ALLOW_WRITES", "false").toLowerCase() === "true";
 const allowChartChanges = setting("OD_ALLOW_CHART_CHANGES", "false").toLowerCase() === "true";
 
-let tools = [...buildTools(od, { allowWrites, allowChartChanges }), ...buildClinicalTools(od, { allowChartChanges })];
+let tools = [...buildTools(od, { allowWrites, allowChartChanges }), ...buildClinicalTools(od, { allowChartChanges }), ...buildLabTools(od, { allowWrites })];
 if (configError) {
   tools = tools.map((t) => ({ ...t, run: async () => { throw configError; } }));
 }

@@ -7,6 +7,23 @@ function startFakeOD({ port = 0, onRequest } = {}) {
   const requests = [];
   const state = {
     failNext: [], // e.g. [{status:429, retryAfter:"0"}]
+    labcases: {
+      1: { LabCaseNum: 1, PatNum: 1, AptNum: 50, DateTimeSent: "2019-03-01 09:00:00", DateTimeRecd: "0001-01-01 00:00:00", DateTimeChecked: "0001-01-01 00:00:00" },
+      2: { LabCaseNum: 2, PatNum: 1, AptNum: 50, DateTimeSent: "0001-01-01 00:00:00", DateTimeRecd: "0001-01-01 00:00:00" },
+      3: { LabCaseNum: 3, PatNum: 1, AptNum: 51, DateTimeSent: "2026-10-20 09:00:00", DateTimeRecd: "0001-01-01 00:00:00" },
+      4: { LabCaseNum: 4, PatNum: 1, AptNum: 52, DateTimeSent: "2026-11-01 09:00:00", DateTimeRecd: "0001-01-01 00:00:00" },
+      5: { LabCaseNum: 5, PatNum: 1, AptNum: 50, DateTimeSent: "2019-03-01 09:00:00", DateTimeRecd: "2019-03-10 10:00:00" },
+      6: { LabCaseNum: 6, PatNum: 1, AptNum: 0, DateTimeSent: "2019-03-01 09:00:00", DateTimeRecd: "0001-01-01 00:00:00" },
+      7: { LabCaseNum: 7, PatNum: 2, AptNum: 53, DateTimeSent: "2020-01-01 09:00:00", DateTimeRecd: "0001-01-01 00:00:00" },
+    },
+    appts: {
+      50: { AptNum: 50, PatNum: 1, AptStatus: "Complete", AptDateTime: "2019-03-15 10:30:00" },
+      51: { AptNum: 51, PatNum: 1, AptStatus: "Complete", AptDateTime: "2026-10-28 08:00:00" },
+      52: { AptNum: 52, PatNum: 1, AptStatus: "Scheduled", AptDateTime: "2026-11-20 09:00:00" },
+      53: { AptNum: 53, PatNum: 2, AptStatus: 2, AptDateTime: "2020-02-02 14:00:00" },
+      54: { AptNum: 54, PatNum: 2, AptStatus: "Scheduled", AptDateTime: "2026-12-01 09:00:00" },
+      55: { AptNum: 55, PatNum: 1, AptStatus: "Planned", AptDateTime: "0001-01-01 00:00:00" },
+    },
     procs: {
       101: { ProcNum: 101, PatNum: 1, ProcStatus: "C", procCode: "D2391", ToothNum: "3" },
       102: { ProcNum: 102, PatNum: 1, ProcStatus: "C", procCode: "D0120" },
@@ -91,6 +108,24 @@ function startFakeOD({ port = 0, onRequest } = {}) {
       }
       if (p === "/definitions") {
         return json(200, rec.query.Category === "20" ? [{ DefNum: 501, ItemName: "1" }, { DefNum: 502, ItemName: "Urgent" }] : [{ DefNum: 601, ItemName: "Caries" }]);
+      }
+      // ---- lab
+      const labcases = state.labcases;
+      if (p === "/laboratories") return json(200, [{ LaboratoryNum: 1, Description: "Smile Lab", IsHidden: "false" }, { LaboratoryNum: 2, Description: "Old Lab", IsHidden: "true" }]);
+      if ((m = p.match(/^\/laboratories\/(\d+)$/))) return m[1] === "1" || m[1] === "2" ? json(200, { LaboratoryNum: Number(m[1]) }) : json(404, { message: "Laboratory not found" });
+      if (p === "/labturnarounds") return json(200, [{ LabTurnaroundNum: 4, LaboratoryNum: 1, Description: "Zirconia crown", DaysPublished: 7, DaysActual: 9 }]);
+      if ((m = p.match(/^\/labturnarounds\/(\d+)$/))) return json(200, { LabTurnaroundNum: 4, LaboratoryNum: 1, DaysActual: 9 });
+      if ((m = p.match(/^\/labcases\/(\d+)$/))) {
+        const lc = labcases[m[1]];
+        if (!lc) return json(404, { message: "LabCase not found" });
+        if (req.method === "GET") return json(200, lc);
+        if (req.method === "PUT") return json(200, { ...lc, ...rec.body });
+      }
+      if (p === "/labcases" && req.method === "GET") return json(200, Object.values(labcases).filter((x) => !rec.query.PatNum || String(x.PatNum) === rec.query.PatNum));
+      if (p === "/labcases" && req.method === "POST") return json(201, { LabCaseNum: 900, ...rec.body });
+      if ((m = p.match(/^\/appointments\/(\d+)$/)) && req.method === "GET") {
+        const ap = state.appts[m[1]];
+        return ap ? json(200, ap) : json(404, { message: "Appointment not found" });
       }
       if (p === "/boom") return json(500, { message: `server error with key ${req.headers.authorization}` });
       json(404, { message: "not found" });

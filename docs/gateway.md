@@ -158,6 +158,9 @@ Status codes: `400` bad input, `401` missing/invalid key, `403` not allowed, `40
 | `patient_recall` | patient |
 | `patient_treatment_plan` | patient |
 | `operatories` | none |
+| `lab_cases_open` | lab?, days_ahead?, limit? |
+| `lab_turnaround` | from, to |
+| `lab_cases_unreceived_completed` | before?, count_only? (`true`/`false`), limit? |
 
 Dates are `yyyy-MM-dd` and inclusive. The full catalog with SQL is in [`core/reports.js`](../core/reports.js); add your own there and send a pull request.
 

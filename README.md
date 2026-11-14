@@ -25,6 +25,8 @@ All three share one core (`core/`), so the safety rules are the same everywhere.
 - "Month-to-date production by provider, net of adjustments and write-offs." / "Collections last week."
 - "What did we do at Mr. Lee's last visit? Is the note signed?" / "Check her meds and allergies before we plan the extraction."
 - With schedule changes allowed: "Move Mrs. Patel's Thursday cleaning to 2:00 in Op 2 and log that she called."
+- "What's at the lab? Anything due back after its seat appointment?" / "Which lab has been slowest this year?"
+- With schedule changes allowed: "Send Mrs. Lee's crown to Smile Lab, due before her seat on the 20th." / "Mark the old lab cases from completed appointments as received."
 - With chart changes allowed: "Write today's group note for Jane Smith: MO composite #3, 1 carp 2% lido 1:100k, tolerated well." / "Treatment plan a crown on 30 and an MOD composite on 3, phase 1, urgent." / "Put the implant on 19 in a separate plan called Option A."
 
 ## Which Open Dental API plan do I need?
@@ -39,11 +41,12 @@ Open Dental sells API access in permission tiers, per location ([pricing and per
 | Upload documents/images; simple insurance updates; setup tables | Documents, InsuranceSimple, Setup | $15/mo |
 | Book or move appointments | Appointments | $30/mo |
 | Write chart notes (group notes, addenda); enter treatment-planned procedures and treatment plans | ProcedureLogs and the general write permission (AllOthers) | $30/mo |
+| Create and update lab cases (sent, received, checked) | General write permission (AllOthers) | $30/mo |
 | Add or edit patients; post procedures; claims and insurance plans | Patients, ProcedureLogs, Insurance | $30/mo |
 | Take payments; payment plans | Payments, PayPlans | $35/mo |
 | Faster cloud access (1 request / 0.5 s, bigger pages) | Enterprise (special) | Contact Open Dental |
 
-The **Claude connector** uses Read All, Queries, Comm, Appointments, ProcedureLogs and the general write permission. Reading notes and adding to notes needs Open Dental 24.2.29 or newer. The **app gateway** can reach every Open Dental endpoint your key's tier allows, limited by each app's allow list.
+The **Claude connector** uses Read All, Queries, Comm, Appointments, ProcedureLogs and the general write permission. Reading notes and adding to notes needs Open Dental 24.2.29 or newer; creating and updating lab cases needs 24.4.19 or newer. The **app gateway** can reach every Open Dental endpoint your key's tier allows, limited by each app's allow list.
 
 Tell the connector and gateway which plan you're on (`read-all`, `standard` or `enterprise`) so they pace cloud requests to match. Local API and API Service requests aren't throttled, so this only matters for the cloud URL.
 
@@ -195,10 +198,15 @@ Contributions welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Please report sec
 
 ## Status
 
-Version 0.4.0. Built from Open Dental's published API documentation and tested against a simulated Open Dental server; first runs against real offices are underway. Please open an issue if an endpoint behaves differently on your version of Open Dental. Known items to confirm:
+Version 0.5.0. Built from Open Dental's published API documentation and tested against a simulated Open Dental server; first runs against real offices are underway. Please open an issue if an endpoint behaves differently on your version of Open Dental. Known items to confirm:
 
 - Request field names for appointment **Break** (`sendToUnscheduledList`) and **Confirm** (`confirmVal`).
 - Report totals vs. Open Dental's built-in Daily P&I and Aging reports (write-off dating follows your Report Setup).
+
+Known Open Dental API behaviors (found in live testing):
+
+- Breaking an appointment through the API adds Open Dental's automatic commlog but not the office's broken-appointment procedure or adjustment; add those in Open Dental if you use them.
+- The open-slot search can return times inside blockouts such as lunch; confirm suggested times in Open Dental.
 
 ## Credits
 

@@ -266,6 +266,60 @@ FROM procedurelog pl JOIN procedurecode pc ON pc.CodeNum = pl.CodeNum
 WHERE pl.PatNum = ${p.patient} AND pl.ProcStatus = 1 ORDER BY pl.ProcDate`,
   },
 
+  lab_cases_open: {
+    category: "lab",
+    description:
+      "Open lab cases (not yet checked) with lab, patient, dates and the linked seat appointment. Status is not_sent, at_lab or received_not_checked; overdue = past due and not received; seat_risk = seat appointment within days_ahead days and case not received.",
+    params: { lab: { type: "id" }, days_ahead: { type: "int", default: 7 }, limit: { type: "int", default: 500 } },
+    sql: (p) => `SELECT lc.LabCaseNum, lc.PatNum, p.LName, p.FName, l.Description AS Lab, lc.ProvNum,
+  lc.DateTimeCreated, lc.DateTimeSent, lc.DateTimeDue, lc.DateTimeRecd, lc.AptNum, a.AptDateTime AS SeatAppt, a.AptStatus,
+  CASE WHEN lc.DateTimeSent < '1880-01-01' THEN 'not_sent'
+       WHEN lc.DateTimeRecd < '1880-01-01' THEN 'at_lab'
+       ELSE 'received_not_checked' END AS Status,
+  (lc.DateTimeRecd < '1880-01-01' AND lc.DateTimeDue > '1880-01-01' AND lc.DateTimeDue < NOW()) AS Overdue,
+  (lc.DateTimeRecd < '1880-01-01' AND a.AptStatus = 1 AND a.AptDateTime < DATE_ADD(NOW(), INTERVAL ${Math.min(Math.max(Number(p.days_ahead), 0), 365)} DAY)) AS SeatRisk,
+  lc.Instructions
+FROM labcase lc
+JOIN patient p ON p.PatNum = lc.PatNum
+LEFT JOIN laboratory l ON l.LaboratoryNum = lc.LaboratoryNum
+LEFT JOIN appointment a ON a.AptNum = lc.AptNum
+WHERE lc.DateTimeChecked < '1880-01-01'${and(p.lab && `lc.LaboratoryNum = ${p.lab}`)}
+ORDER BY (lc.DateTimeDue < '1880-01-01'), lc.DateTimeDue LIMIT ${Math.min(Math.max(Number(p.limit), 1), 5000)}`,
+  },
+
+  lab_turnaround: {
+    category: "lab",
+    description: "Actual lab turnaround per lab (days from sent to received) for cases sent in a date range.",
+    params: { from: { type: "date", required: true }, to: { type: "date", required: true } },
+    sql: (p) => `SELECT l.Description AS Lab, COUNT(*) AS Cases,
+  ROUND(AVG(DATEDIFF(lc.DateTimeRecd, lc.DateTimeSent)), 1) AS AvgDays,
+  MAX(DATEDIFF(lc.DateTimeRecd, lc.DateTimeSent)) AS MaxDays,
+  SUM(lc.DateTimeDue > '1880-01-01' AND lc.DateTimeRecd > lc.DateTimeDue) AS ReturnedLate
+FROM labcase lc JOIN laboratory l ON l.LaboratoryNum = lc.LaboratoryNum
+WHERE lc.DateTimeSent > '1880-01-01' AND lc.DateTimeRecd > '1880-01-01'
+  AND DATE(lc.DateTimeSent) BETWEEN ${p.from} AND ${p.to}
+GROUP BY l.Description ORDER BY AvgDays DESC`,
+  },
+
+  lab_cases_unreceived_completed: {
+    category: "lab",
+    description:
+      "Cleanup list: lab cases never marked received although their linked appointment is Complete. Optional cutoff skips appointments on or after that date. Use count_only for the total.",
+    params: { before: { type: "date" }, count_only: { type: enumType("true", "false"), default: "false" }, limit: { type: "int", default: 1000 } },
+    sql: (p) =>
+      p.count_only === "true"
+        ? `SELECT COUNT(*) AS Cases, SUM(lc.DateTimeSent < '1880-01-01') AS NeverSent,
+  MIN(DATE(a.AptDateTime)) AS EarliestAppt, MAX(DATE(a.AptDateTime)) AS LatestAppt
+FROM labcase lc JOIN appointment a ON a.AptNum = lc.AptNum
+WHERE lc.DateTimeRecd < '1880-01-01' AND a.AptStatus = 2${and(p.before && `a.AptDateTime < ${p.before}`)}`
+        : `SELECT lc.LabCaseNum, lc.PatNum, DATE(a.AptDateTime) AS ApptDate, lc.AptNum,
+  (lc.DateTimeSent < '1880-01-01') AS NeverSent, l.Description AS Lab
+FROM labcase lc JOIN appointment a ON a.AptNum = lc.AptNum
+LEFT JOIN laboratory l ON l.LaboratoryNum = lc.LaboratoryNum
+WHERE lc.DateTimeRecd < '1880-01-01' AND a.AptStatus = 2${and(p.before && `a.AptDateTime < ${p.before}`)}
+ORDER BY a.AptDateTime, lc.LabCaseNum LIMIT ${Math.min(Math.max(Number(p.limit), 1), 5000)}`,
+  },
+
   operatories: {
     category: "schedule",
     description: "Operatories (chairs) with assigned providers.",

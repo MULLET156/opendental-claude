@@ -1,6 +1,6 @@
 name: Release
-# Builds dist/opendental.mcpb and dist/opendental.plugin and publishes them as a
-# GitHub release named after the version in package.json.
+# Builds dist/opendental.mcpb, dist/opendental.plugin and dist/opendental-gateway-windows.zip
+# and publishes them as a GitHub release named after the version in package.json.
 # Run it from the Actions tab ("Run workflow"), or push a tag like v0.3.0.
 on:
   workflow_dispatch:
@@ -32,8 +32,8 @@ jobs:
           TAG: ${{ steps.tag.outputs.tag }}
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/opendental.mcpb dist/opendental.plugin --clobber
+            gh release upload "$TAG" dist/opendental.mcpb dist/opendental.plugin dist/opendental-gateway-windows.zip --clobber
           else
-            gh release create "$TAG" dist/opendental.mcpb dist/opendental.plugin \
+            gh release create "$TAG" dist/opendental.mcpb dist/opendental.plugin dist/opendental-gateway-windows.zip \
               --target "$GITHUB_SHA" --title "$TAG" --notes-file CHANGELOG.md
           fi

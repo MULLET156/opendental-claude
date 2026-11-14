@@ -27,3 +27,4 @@ jobs:
           path: |
             dist/opendental.mcpb
             dist/opendental.plugin
+            dist/opendental-gateway-windows.zip

@@ -12,10 +12,9 @@
  *                                              show what would be sent, without sending or writing anything)
  */
 
-const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { newKey, hashKey, loadConfig, ConfigError } = require("./config");
+const { newKey, hashKey, loadConfig, loadEnvFile, ConfigError } = require("./config");
 
 const [cmd, arg] = process.argv.slice(2);
 
@@ -65,12 +64,7 @@ switch (cmd) {
     const dryRun = args.includes("--dry-run");
     const file = path.resolve(args.find((a) => !a.startsWith("--")) || "gateway.config.json");
     const envFile = path.join(path.dirname(file), ".env");
-    if (fs.existsSync(envFile)) {
-      for (const line of fs.readFileSync(envFile, "utf8").split(/\r?\n/)) {
-        const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
-        if (m && !line.trim().startsWith("#") && process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^(['"])(.*)\1$/, "$2");
-      }
-    }
+    loadEnvFile(envFile);
     let cfg;
     try {
       cfg = loadConfig(file);

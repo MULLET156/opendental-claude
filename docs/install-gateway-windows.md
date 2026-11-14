@@ -1,16 +1,48 @@
 # Install the gateway on the office server (Windows)
 
-This guide installs the gateway on the **Open Dental server** (or another office computer that's always on) and runs it in the background at startup. It sets up the [lab tracker sync](lab-tracker-sync.md) first; adding your own apps is at the end.
+This installs the gateway on the **Open Dental server** (or another office computer that's always on) and runs it in the background at startup, with the [lab tracker sync](lab-tracker-sync.md) if you use it.
 
-Allow about 30 minutes. You need:
+You need:
 
 - Administrator access to the office server.
 - Your Open Dental **Developer Key** and **Customer Key**, with the API Service working (see the [README](../README.md#set-up-the-api-service-in-the-office-one-time)).
-- For the lab sync: access to the lab tracker's files on your web host (for example Hostinger's File Manager).
+- For the lab sync: the tracker's address (ending in `/od-sync.php`) and access to its files on your web host (for example Hostinger's File Manager).
 
-Run every command below in **PowerShell as administrator** (right-click Start → **Terminal (Admin)**).
+## Easy way: Setup (about 10 minutes)
 
-## 1. Install Node.js and Git
+1. Download **opendental-gateway-windows.zip** from the [latest release](https://github.com/MULLET156/opendental-claude/releases/latest) onto the office server.
+2. Right-click it → **Extract All**.
+3. In the extracted folder, double-click **Setup.cmd**.
+   - If Windows shows **"Windows protected your PC"**, click **More info → Run anyway** (the script isn't code-signed).
+   - Click **Yes** when Windows asks for administrator permission.
+4. Answer the questions:
+   - **API address**: press Enter for the default on the Open Dental server.
+   - **Developer Key** and **Customer Key**: paste each (typing is hidden). Setup tests them right away.
+   - **Lab tracker sync**: answer **y**, then the tracker address, your in-house lab number(s) (Setup lists your labs), the start date and how patients appear (J. Smith or J.S.).
+   - Setup shows a line like `define('OD_SYNC_SECRET', '…');` and copies it to the clipboard. Paste it into the tracker's `config.php` on your web host, save, then press Enter.
+   - It shows a **preview** of what would be sent (nothing is sent yet), then offers to send once to check the tracker answers.
+5. Setup starts the gateway and sets it to start with Windows. You're done.
+
+What Setup does:
+
+- Installs into `C:\OpenDentalGateway`: the gateway in `app`, its own copy of Node.js in `node` (downloaded from nodejs.org and checked against the published checksums; nothing else on the computer changes), and your settings and logs in `data`.
+- Saves the keys in `data\.env`, readable only by administrators.
+- Creates the **Open Dental Gateway** task in Task Scheduler (runs at startup as SYSTEM, restarts if it stops).
+
+Later:
+
+- **Change settings:** double-click `C:\OpenDentalGateway\Setup.cmd`.
+- **Update:** download the newer zip, extract it and run its `Setup.cmd`; answer **Y** to "Keep all current settings".
+- **Logs:** `C:\OpenDentalGateway\data\logs\gateway.log`, plus `audit-<date>.jsonl` (counts only, no patient data).
+- **Remove:** in an admin PowerShell, `powershell -ExecutionPolicy Bypass -File C:\OpenDentalGateway\app\gateway\windows\setup.ps1 -Uninstall`.
+
+If something goes wrong, Setup says what and stops without changing anything in Open Dental; fix it and run Setup again. The [troubleshooting table](#troubleshooting) explains the common messages.
+
+## Manual install
+
+Use this if you'd rather install with Git, for example to follow the repository directly. Allow about 30 minutes, and run every command in **PowerShell as administrator** (right-click Start → **Terminal (Admin)**).
+
+### 1. Install Node.js and Git
 
 ```powershell
 winget install OpenJS.NodeJS.LTS
@@ -26,7 +58,7 @@ git --version
 
 `node -v` must show **v20** or newer. (Without winget: install the LTS version from [nodejs.org](https://nodejs.org) and Git from [git-scm.com](https://git-scm.com).)
 
-## 2. Download the gateway
+### 2. Download the gateway
 
 ```powershell
 git clone https://github.com/MULLET156/opendental-claude.git C:\OpenDentalGateway
@@ -38,7 +70,7 @@ Copy-Item gateway\.env.example .env
 
 The gateway has no other dependencies; there is no `npm install` step.
 
-## 3. Add the Open Dental keys
+### 3. Add the Open Dental keys
 
 ```powershell
 notepad .env
@@ -62,7 +94,7 @@ icacls .env /inheritance:r /grant:r "Administrators:F" "SYSTEM:F"
 
 Never email `.env`, paste it into a chat, or commit it to GitHub.
 
-## 4. Connect the lab tracker
+### 4. Connect the lab tracker
 
 1. **Make the shared secret:**
 
@@ -110,7 +142,7 @@ Never email `.env`, paste it into a chat, or commit it to GitHub.
 
      `syncFrom` is the first day whose new lab cases should go to the tracker; use the day you turn it on. All settings are explained in [lab-tracker-sync.md](lab-tracker-sync.md#set-up).
 
-## 5. Test it
+### 5. Test it
 
 ```powershell
 node gateway\cli.js check
@@ -124,7 +156,7 @@ node gateway\cli.js lab-sync
 
 If something fails, see [Troubleshooting](#troubleshooting).
 
-## 6. Run it at startup
+### 6. Run it at startup
 
 This creates a scheduled task that starts the gateway when the server boots, runs it without anyone logged in, and restarts it if it stops:
 
@@ -155,7 +187,7 @@ Unregister-ScheduledTask -TaskName "Open Dental Gateway"
 
 After changing `.env` or `gateway.config.json`, stop and start the task.
 
-## 7. (Optional) Add your own apps
+### 7. (Optional) Add your own apps
 
 The gateway listens on `127.0.0.1:8787`, so only programs on the server can call it. For each app:
 
@@ -173,7 +205,7 @@ Don't port-forward 8787 on your router. See [gateway.md](gateway.md) for permiss
 
 The lab sync needs **no** open ports: the gateway only makes outgoing HTTPS requests to the tracker.
 
-## Updating
+### Updating a manual install
 
 ```powershell
 cd C:\OpenDentalGateway

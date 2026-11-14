@@ -150,7 +150,7 @@ function loadConfig(file) {
   const full = path.resolve(file);
   let text;
   try {
-    text = fs.readFileSync(full, "utf8");
+    text = fs.readFileSync(full, "utf8").replace(/^\uFEFF/, ""); // Notepad may add a byte-order mark
   } catch {
     throw new ConfigError(`Can't read config file ${full}. Copy gateway/gateway.config.example.json to start.`);
   }
@@ -187,8 +187,22 @@ function allowsReport(app, name) {
   return app.reports.has("*") || app.reports.has(name);
 }
 
+/** Minimal .env reader: KEY=value lines; real environment variables win. */
+function loadEnvFile(file) {
+  if (!fs.existsSync(file)) return false;
+  const text = fs.readFileSync(file, "utf8").replace(/^\uFEFF/, "");
+  for (const line of text.split(/\r?\n/)) {
+    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
+    if (!m || line.trim().startsWith("#")) continue;
+    const value = m[2].replace(/^(['"])(.*)\1$/, "$2");
+    if (process.env[m[1]] === undefined) process.env[m[1]] = value;
+  }
+  return true;
+}
+
 module.exports = {
   ConfigError,
+  loadEnvFile,
   METHODS,
   newKey,
   hashKey,

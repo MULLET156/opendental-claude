@@ -63,13 +63,43 @@ function AskYes([string]$question, [bool]$default = $true) {
 }
 
 function AskSecret([string]$question) {
+  $s = Read-Host "   $question" -AsSecureString
+  $b = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($s)
+  try { return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($b) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b) }
+}
+
+# Describes what's wrong with a key without showing it.
+function Describe-Key([string]$raw) {
+  $problems = @()
+  if ($raw -match '[\x00-\x1F\x7F]') { $problems += "a control character (this happens when Ctrl+V doesn't paste in this window: right-click to paste instead)" }
+  if ($raw -match '[\u200B-\u200D\u2060\uFEFF\u00A0]') { $problems += "an invisible character copied along with the key" }
+  if ($raw -match '[:=]') { $problems += "a ':' or '=' (paste only the key, not its label)" }
+  if ($raw -match '[^\x00-\x7F]') { $problems += "a non-English character" }
+  $other = ($raw -replace '[A-Za-z0-9_\-\s\x00-\x1F\x7F\u200B-\u200D\u2060\uFEFF\u00A0:=]', '')
+  if ($other -match '[\x21-\x7E]') { $problems += "punctuation such as $((($other.ToCharArray() | Where-Object { [int]$_ -lt 127 } | Select-Object -Unique) -join ' '))" }
+  $clean = $raw -replace '[\s\x00-\x1F\x7F\u200B-\u200D\u2060\uFEFF]', ''
+  $problems += "$($clean.Length) characters long"
+  return ($problems -join "; ")
+}
+
+# Asks for an Open Dental key. Removes spaces, line breaks, quotes and invisible characters
+# picked up when copying; if it still doesn't look like a key, says why (without showing it)
+# and offers to show the typing on screen.
+function AskKey([string]$question) {
+  $visible = $false
   while ($true) {
-    $s = Read-Host "   $question" -AsSecureString
-    $b = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($s)
-    try { $plain = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($b) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b) }
-    $plain = $plain.Trim()
-    if ($plain) { return $plain }
-    Warn "This can't be blank."
+    if ($visible) { $raw = Read-Host "   $question (shown on screen)" } else { $raw = AskSecret $question }
+    if ($null -eq $raw) { $raw = "" }
+    $v = ($raw -replace '[\s\x00-\x1F\x7F\u200B-\u200D\u2060\uFEFF]', '').Trim([char[]]@([char]34, [char]39, [char]0x201C, [char]0x201D, [char]0x2018, [char]0x2019))
+    if (-not $v) {
+      if ($raw.Length) { Warn "Nothing was pasted. If Ctrl+V doesn't work in this window, right-click to paste." } else { Warn "This can't be blank." }
+    } elseif ($v -match '^[A-Za-z0-9_-]{4,128}$') {
+      return $v
+    } else {
+      Warn "That doesn't look like an Open Dental key: it has $(Describe-Key $raw)."
+      Say "   Open Dental keys are letters and numbers only." "DarkGray"
+    }
+    if (-not $visible) { $visible = AskYes "Show what you paste on screen so you can check it?" $true }
   }
 }
 
@@ -258,9 +288,9 @@ try {
       if ($envMap['OD_BASE_URL'] -match 'api\.opendental\.com') {
         $envMap['OD_API_PLAN'] = Ask "Your Open Dental API plan (read-all, standard, enterprise)" $(if ($envMap['OD_API_PLAN']) { $envMap['OD_API_PLAN'] } else { "standard" })
       } else { $envMap.Remove('OD_API_PLAN') }
-      Say "   Paste each key and press Enter (typing is hidden)."
-      $envMap['OD_DEVELOPER_KEY'] = AskSecret "Developer Key"
-      $envMap['OD_CUSTOMER_KEY'] = AskSecret "Customer Key"
+      Say "   Paste each key and press Enter. Typing is hidden; right-click pastes if Ctrl+V doesn't." 
+      $envMap['OD_DEVELOPER_KEY'] = AskKey "Developer Key"
+      $envMap['OD_CUSTOMER_KEY'] = AskKey "Customer Key"
       Write-EnvFile $EnvFile $envMap
     }
     Say "   Testing the connection..."

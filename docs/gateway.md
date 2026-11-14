@@ -91,7 +91,7 @@ node gateway/server.js
 
 | Setting | Meaning |
 |---|---|
-| `listen.host` | `127.0.0.1` (default) accepts only this computer. Use `0.0.0.0` to accept the office network. |
+| `listen.host` | `127.0.0.1` (default) accepts only this computer. Use `0.0.0.0` to accept the office network, and on Windows allow the port for the office network only: `New-NetFirewallRule -DisplayName "Open Dental Gateway" -Direction Inbound -Protocol TCP -LocalPort 8787 -Action Allow -Profile Domain,Private`. |
 | `tls` | Optional. Serve HTTPS directly with these PEM files (paths relative to the config). Otherwise put a reverse proxy in front. |
 | `trustProxy` | Use `X-Forwarded-For` for the audit log's IP (only behind your own proxy). |
 | `auditLogDir` | Folder for daily `audit-YYYY-MM-DD.jsonl` files. `null` turns logging off (not recommended). |

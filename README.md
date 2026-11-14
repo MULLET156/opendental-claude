@@ -62,15 +62,65 @@ The API is a paid Open Dental add-on, billed per location. See [Open Dental's AP
 | Cloud | `https://api.opendental.com/api/v1` | Working from outside the office. Needs the eConnector running. Open Dental throttles by plan (see above); the connector paces itself. |
 | Local API | `http://localhost:30222/api/v1` | Open Dental itself is open and logged in on the same computer. |
 
-If the API Service URL doesn't connect, check the service is running in Open Dental (**Tools > Misc Tools > Service Manager**) and that the server's firewall allows port 30223 from your office network. It's plain http, so keep it on your LAN.
+#### Set up the API Service (in the office, one time)
+
+Do these on the **Open Dental server** (the computer that hosts the database), logged into Open Dental as an administrator. The API Service needs eConnector version 22.2.16 or later and internet access (it checks your keys with Open Dental every few hours).
+
+1. **Turn on the API:** **Setup > Advanced Setup > API**. Make sure your Customer Key is listed and **API Enabled** is checked.
+2. **Check the API Service is running:** **Tools > Misc Tools > Service Manager** should list **OpenDentalAPIService** as Started. Open Dental normally installs it automatically once the API is enabled. If it's missing, click **Add**, name it `OpenDentalAPIService`, choose `OpenDentalAPIService.exe`, click **Install**, enter your database connection details, click **OK**, then **Start**.
+3. **Allow the office network through the server's firewall.** Right-click Start, open **Terminal (Admin)** or **PowerShell (Admin)**, and run:
+
+   ```powershell
+   New-NetFirewallRule -DisplayName "Open Dental API Service" -Direction Inbound -Protocol TCP -LocalPort 30223 -Action Allow -Profile Domain,Private
+   ```
+
+   This opens port 30223 to your **office network only** (Domain and Private network profiles). Don't set up port forwarding for 30223 on your router: the API Service is plain http and must not be reachable from the internet.
+4. **Find the server's address:** in the same window run `ipconfig` and note the **IPv4 Address** (for example `192.168.1.20`). Your API URL is then `http://192.168.1.20:30223/api/v1`. A fixed (reserved) address for the server keeps this from changing.
+
+#### Test the connection from the computer running Claude
+
+Replace `192.168.1.20` with your server's address.
+
+**Windows** (PowerShell):
+
+```powershell
+Test-NetConnection 192.168.1.20 -Port 30223
+```
+
+You want `TcpTestSucceeded : True`.
+
+**Mac** (Terminal):
+
+```bash
+nc -vz 192.168.1.20 30223
+```
+
+You want `succeeded`.
+
+If the test fails: check the API Service shows Started in Service Manager, that the firewall rule exists on the server (`Get-NetFirewallRule -DisplayName "Open Dental API Service"`), that both computers are on the same office network, and that the address is right. On the server itself, `Test-NetConnection 127.0.0.1 -Port 30223` tells you whether the service is listening at all.
+
+Once the port answers, you can also check your keys from that computer. In PowerShell (replace both keys and the address; don't save this command anywhere):
+
+```powershell
+Invoke-RestMethod -Uri "http://192.168.1.20:30223/api/v1/providers" -Headers @{ Authorization = "ODFHIR YOUR_DEVELOPER_KEY/YOUR_CUSTOMER_KEY" } | Select-Object ProvNum, Abbr
+```
+
+A list of providers means everything works. `401` means a key is wrong or the API isn't enabled; `403` means the Customer Key lacks that permission.
 
 ### 3. Install the Claude connector and skills
 
 Download **opendental.mcpb** and **opendental.plugin** from the [latest release](https://github.com/MULLET156/opendental-claude/releases/latest).
 
-1. Open **opendental.mcpb** on the computer running Claude desktop (or drag it into **Settings > Extensions**) and click **Install**. Enter the Developer Key, Customer Key, API URL and (for the cloud URL) your API plan. Keys are stored in your system keychain. Leave **Allow changes** off until you've tried it.
+1. Install **opendental.mcpb** in Claude desktop on the computer you'll use, any of these ways:
+   - double-click the file, or
+   - drag it onto **Settings > Extensions**, or
+   - **Settings > Extensions > Advanced settings > Install Extension…** and pick the file.
+
+   (If double-clicking opens a zip tool or asks which program to use, use one of the Settings options. If you don't see Extensions, update Claude desktop.)
+
+   Click **Install** and fill in the form: Developer Key, Customer Key, API URL, and (for the cloud URL) your API plan. Keys are stored in your system's secure storage. Leave **Allow changes** off until you've tried it. Make sure **Open Dental** shows as enabled. To change settings later: **Settings > Extensions > Open Dental > Configure**.
 2. Install **opendental.plugin** in Claude. If you use plugin marketplaces, you can instead add this repo as one: `MULLET156/opendental-claude`.
-3. Ask Claude: **"Check my Open Dental connection."**
+3. Start a new chat and ask Claude: **"Check my Open Dental connection."**
 
 To try everything without real patient data, use the cloud URL with the public test keys on Open Dental's API setup page.
 

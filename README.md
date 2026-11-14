@@ -10,6 +10,8 @@ Connect [Open Dental](https://www.opendental.com/) to Claude, and to the apps yo
 
 All three share one core (`core/`), so the safety rules are the same everywhere. There are **no dependencies** to install; everything runs on plain Node.js, and Claude desktop supplies its own copy for the connector.
 
+> This GitHub repository is the master copy. Download releases from here; copies elsewhere may be out of date.
+>
 > Independent, community project. Not affiliated with or endorsed by Open Dental Software, Inc. "Open Dental" is their trademark.
 
 ---

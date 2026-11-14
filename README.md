@@ -140,7 +140,7 @@ To try everything without real patient data, use the cloud URL with the public t
 
 ### 4. (Optional) Run the app gateway
 
-See **[docs/gateway.md](docs/gateway.md)**. In short:
+See **[docs/gateway.md](docs/gateway.md)**, or the step-by-step **[Windows office server guide](docs/install-gateway-windows.md)**. In short:
 
 ```bash
 git clone https://github.com/MULLET156/opendental-claude.git

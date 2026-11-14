@@ -151,6 +151,8 @@ node gateway/cli.js new-key "my-app"   # prints an app key + config entry
 node gateway/server.js                 # starts on http://127.0.0.1:8787
 ```
 
+The gateway can also sync lab cases with a web-hosted lab tracker; see **[docs/lab-tracker-sync.md](docs/lab-tracker-sync.md)**.
+
 Then from your app's server:
 
 ```bash
@@ -185,7 +187,7 @@ plugin/        Claude plugin: skills for schedule, patients, billing, production
 gateway/       app gateway server, config, CLI
 scripts/       build.js: packs dist/opendental.mcpb and dist/opendental.plugin (no dependencies)
 test/          node:test suite with a fake Open Dental server
-docs/          gateway guide, HIPAA and security notes
+docs/          gateway guide, lab tracker sync, HIPAA and security notes
 ```
 
 ## Develop

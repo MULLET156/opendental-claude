@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.0 — 2026-11-14
+
+- **Lab tracker sync** (gateway): keeps a web-hosted lab tracker in step with Open Dental's lab cases. Cases added in Open Dental appear in the tracker (patient as "J. Smith" or "J.S." only; no DOB, chart number or Open Dental record numbers); when every step is done Open Dental's case is marked Checked and the seat appointment gets a "ready to deliver" note; for outside labs the tracker's sent date marks the case Sent. Office-initiated over HTTPS, signed with a shared secret (HMAC-SHA256, 5-minute window, replay protection); every write is read back. Off unless `labSync` is configured. See `docs/lab-tracker-sync.md`.
+- Gateway CLI: `new-secret` and `lab-sync [--dry-run]`. A gateway can run with only the lab sync and no apps.
+- New report `lab_cases_for_sync`.
+
 ## 0.7.0 — 2026-11-14
 
 Fixes and gaps found in live testing.

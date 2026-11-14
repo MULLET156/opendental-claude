@@ -6,6 +6,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
+const { validateLabSync, SyncError } = require("./lab-sync");
 
 const METHODS = ["GET", "POST", "PUT", "DELETE"];
 
@@ -89,7 +90,13 @@ function validateConfig(raw, { requireApps = true } = {}) {
   }
 
   const apps = Array.isArray(raw.apps) ? raw.apps : [];
-  if (requireApps && !apps.length) throw new ConfigError('No apps configured. Add one with: node gateway/cli.js new-key "<app name>"');
+  try {
+    cfg.labSync = validateLabSync(raw.labSync);
+  } catch (e) {
+    if (e instanceof SyncError) throw new ConfigError(e.message);
+    throw e;
+  }
+  if (requireApps && !apps.length && !cfg.labSync) throw new ConfigError('No apps configured. Add one with: node gateway/cli.js new-key "<app name>"');
   const names = new Set();
   const hashes = new Set();
   for (const [i, a] of apps.entries()) {

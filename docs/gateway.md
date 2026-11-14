@@ -57,6 +57,10 @@ node gateway/server.js
 - **Linux:** a systemd unit with `ExecStart=/usr/bin/node /opt/opendental-claude/gateway/server.js /etc/odgw/gateway.config.json` and `Restart=always`.
 - **Docker:** see the `Dockerfile` in the repo root; mount your config and pass the `OD_*` variables.
 
+## Lab tracker sync
+
+The gateway can also keep a web-hosted lab case tracker in step with Open Dental: new lab cases are pushed to the tracker, and "ready" (and "sent" for outside labs) are written back. See **[lab-tracker-sync.md](lab-tracker-sync.md)**.
+
 ## Configuration
 
 ```json

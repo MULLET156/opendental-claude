@@ -4,6 +4,16 @@
   "maxRows": 1000,
   "corsOrigins": [],
   "openDental": { "plan": "standard" },
+  "labSync": {
+    "enabled": false,
+    "trackerUrl": "https://lab.example.com/od-sync.php",
+    "syncFrom": "2026-11-15",
+    "inHouseLabs": [1],
+    "intervalMinutes": 5,
+    "keepDays": 30,
+    "patientFormat": "initial-last",
+    "readyNote": "Lab case ready to deliver"
+  },
   "apps": [
     {
       "name": "lab-case-tracker",

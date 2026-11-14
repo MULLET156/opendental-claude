@@ -255,7 +255,7 @@ function createGateway({ config, od, version = "dev", now = () => Date.now() }) 
   }
 
   // ---------------------------------------------------------------- handler
-  return async function handle(req, res) {
+  const handle = async function handle(req, res) {
     const started = now();
     const cors = corsHeaders(req);
     let url;
@@ -317,6 +317,8 @@ function createGateway({ config, od, version = "dev", now = () => Date.now() }) 
       });
     }
   };
+  handle.audit = audit;
+  return handle;
 }
 
 module.exports = { createGateway, HttpError };

@@ -53,12 +53,12 @@ function startTracker({ secret = SECRET, events = [] } = {}) {
 
 const ROWS = [
   // in-house CEREC case, seat appointment scheduled
-  { LabCaseNum: 501, FirstInitial: "j", LastName: "smith", LaboratoryNum: 1, Lab: "TDC In-house", Provider: "DOC1", DateTimeCreated: "2026-11-15 09:00:00", DateTimeSent: "0001-01-01 00:00:00", DateTimeDue: "2026-11-18 00:00:00", DateTimeRecd: "0001-01-01 00:00:00", DateTimeChecked: "0001-01-01 00:00:00", AptNum: 52, SeatAppt: "2026-11-20 09:00:00", SeatStatus: 1 },
+  { LabCaseNum: 501, PatNum: 7001, FirstInitial: "j", LastName: "smith", LaboratoryNum: 1, Lab: "TDC In-house", Provider: "DOC1", DateTimeCreated: "2026-11-15 09:00:00", DateTimeSent: "0001-01-01 00:00:00", DateTimeDue: "2026-11-18 00:00:00", DateTimeRecd: "0001-01-01 00:00:00", DateTimeChecked: "0001-01-01 00:00:00", AptNum: 52, SeatAppt: "2026-11-20 09:00:00", SeatStatus: 1 },
   // outside lab, not yet sent
-  { LabCaseNum: 502, FirstInitial: "A", LastName: "de la Cruz", LaboratoryNum: 2, Lab: "Smile Lab", Provider: "DOC1", DateTimeCreated: "2026-11-15 10:00:00", DateTimeSent: "0001-01-01 00:00:00", DateTimeDue: "2026-11-25 00:00:00", DateTimeRecd: "0001-01-01 00:00:00", DateTimeChecked: "0001-01-01 00:00:00", AptNum: 0, SeatAppt: null, SeatStatus: null },
+  { LabCaseNum: 502, PatNum: 7002, FirstInitial: "A", LastName: "de la Cruz", LaboratoryNum: 2, Lab: "Smile Lab", Provider: "DOC1", DateTimeCreated: "2026-11-15 10:00:00", DateTimeSent: "0001-01-01 00:00:00", DateTimeDue: "2026-11-25 00:00:00", DateTimeRecd: "0001-01-01 00:00:00", DateTimeChecked: "0001-01-01 00:00:00", AptNum: 0, SeatAppt: null, SeatStatus: null },
 ];
 
-async function setup(t, { events = [], rows = ROWS } = {}) {
+async function setup(t, { events = [], rows = ROWS, sendPatNum } = {}) {
   const od = await startFakeOD({
     onRequest: (rec) => (rec.path.endsWith("/queries/ShortQuery") && /FirstInitial/.test(rec.body.SqlCommand) ? { body: rows } : null),
   });
@@ -70,7 +70,7 @@ async function setup(t, { events = [], rows = ROWS } = {}) {
     await tracker.close();
   });
   const client = createClient({ baseUrl: od.url, developerKey: "dev1", customerKey: "cust1" });
-  const cfg = validateLabSync({ trackerUrl: tracker.url, syncFrom: "2026-11-15", inHouseLabs: [1] });
+  const cfg = validateLabSync({ trackerUrl: tracker.url, syncFrom: "2026-11-15", inHouseLabs: [1], ...(sendPatNum === undefined ? {} : { sendPatNum }) });
   return { od, tracker, cfg, run: (extra = {}) => runLabSync({ od: client, cfg, secret: SECRET, ...extra }) };
 }
 
@@ -125,7 +125,7 @@ test("push sends only the agreed fields", async (t) => {
     { patient: "J. Smith", lab: "TDC In-house", inHouse: true, due: "2026-11-18", seat: "2026-11-20", sent: null }
   );
   const text = JSON.stringify(push);
-  for (const banned of ["501", "502", "PatNum", "LabCaseNum", "AptNum", "Birthdate", "smith\""]) assert.ok(!text.includes(banned), banned);
+  for (const banned of ["501", "502", "7001", "7002", "patnum", "PatNum", "LabCaseNum", "AptNum", "Birthdate", "smith\""]) assert.ok(!text.includes(banned), banned);
   assert.equal(tracker.calls.filter((c) => c.op === "ack").length, 0); // no events, no ack
 });
 
@@ -186,4 +186,18 @@ test("wrong secret or unreachable tracker stops the round", async (t) => {
   await assert.rejects(runLabSync({ od: client, cfg, secret: "short" }), /LAB_SYNC_SECRET/);
   await tracker.close();
   await assert.rejects(runLabSync({ od: client, cfg, secret: SECRET }), SyncError);
+});
+
+test("sendPatNum adds only the PatNum", async (t) => {
+  const { run, tracker } = await setup(t, { sendPatNum: true });
+  await run();
+  const push = tracker.calls.find((c) => c.op === "push");
+  assert.deepEqual(push.cases.map((c) => c.patnum), [7001, 7002]);
+  const text = JSON.stringify(push);
+  for (const banned of ["501", "502", "LabCaseNum", "AptNum", "Birthdate"]) assert.ok(!text.includes(banned), banned);
+});
+
+test("sendPatNum must be true or false", () => {
+  assert.throws(() => validateLabSync({ trackerUrl: "https://lab.example.com/od-sync.php", syncFrom: "2026-11-15", sendPatNum: "yes" }), /sendPatNum/);
+  assert.equal(validateLabSync({ trackerUrl: "https://lab.example.com/od-sync.php", syncFrom: "2026-11-15" }).sendPatNum, false);
 });

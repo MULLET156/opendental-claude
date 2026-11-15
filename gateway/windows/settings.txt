@@ -44,6 +44,10 @@ SYNC_START_DATE=today
 # How patients appear in the tracker: J. Smith  or  J.S.
 PATIENT_FORMAT=J. Smith
 
+# Also send Open Dental's patient number (PatNum) so staff can find the patient:
+# yes or no. Blank keeps the choice saved before (no, the first time).
+SEND_PATIENT_NUMBER=
+
 # Optional: the same secret that's in the tracker's config.php (OD_SYNC_SECRET).
 # Leave blank and Setup keeps the one it saved before, or makes a new one and
 # shows you the line to add to config.php.

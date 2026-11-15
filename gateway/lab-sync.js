@@ -4,9 +4,9 @@
  *
  * Runs inside the gateway in the office. Every few minutes it:
  *   1. reads recent lab cases from Open Dental,
- *   2. pushes them to the lab tracker (patient as "J. Smith" or "J.S." only: no DOB,
- *      chart number, PatNum or other Open Dental numbers; cases are matched by a
- *      keyed hash the tracker can't reverse),
+ *   2. pushes them to the lab tracker (patient as "J. Smith" or "J.S."; no DOB or chart
+ *      number; the patient's PatNum only when "sendPatNum" is turned on; no other Open
+ *      Dental numbers; cases are matched by a keyed hash the tracker can't reverse),
  *   3. asks the tracker for staff updates and writes them back to Open Dental:
  *        ready -> lab case Checked + a note on the seat appointment
  *        sent  -> lab case Sent (outside labs only)
@@ -35,6 +35,7 @@ function validateLabSync(raw) {
     keepDays: Number(raw.keepDays ?? 30),
     inHouseLabs: Array.isArray(raw.inHouseLabs) ? raw.inHouseLabs.map(Number) : [],
     patientFormat: raw.patientFormat || "initial-last",
+    sendPatNum: raw.sendPatNum === true,
     readyNote: String(raw.readyNote || "Lab case ready to deliver"),
     timeoutMs: Number(raw.timeoutMs || 30000),
   };
@@ -52,6 +53,7 @@ function validateLabSync(raw) {
   if (!Number.isInteger(cfg.keepDays) || cfg.keepDays < 0 || cfg.keepDays > 365) throw new SyncError("labSync.keepDays must be 0-365.");
   if (cfg.inHouseLabs.some((n) => !Number.isSafeInteger(n) || n <= 0)) throw new SyncError("labSync.inHouseLabs must list LaboratoryNums.");
   if (!["initial-last", "initials"].includes(cfg.patientFormat)) throw new SyncError('labSync.patientFormat must be "initial-last" (J. Smith) or "initials" (J.S.).');
+  if (raw.sendPatNum !== undefined && typeof raw.sendPatNum !== "boolean") throw new SyncError("labSync.sendPatNum must be true or false.");
   if (cfg.readyNote.length > 200) throw new SyncError("labSync.readyNote is too long.");
   return cfg;
 }
@@ -121,6 +123,8 @@ function toTracker(row, cfg, secret) {
     checked: day(row.DateTimeChecked),
     seat: (seatScheduled || seatDone) ? day(row.SeatAppt) : null,
     seat_done: seatDone,
+    // Open Dental's patient number, so staff can find the patient: only when turned on.
+    ...(cfg.sendPatNum && Number.isSafeInteger(Number(row.PatNum)) && Number(row.PatNum) > 0 ? { patnum: Number(row.PatNum) } : {}),
   };
 }
 

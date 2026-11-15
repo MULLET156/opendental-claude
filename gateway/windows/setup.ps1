@@ -226,7 +226,7 @@ function Write-EnvFile([string]$file, [hashtable]$map) {
 
 # ---------------------------------------------------------------- settings.txt
 
-$SettingNames = @("DEVELOPER_KEY", "CUSTOMER_KEY", "OPEN_DENTAL_ADDRESS", "API_PLAN", "LAB_SYNC", "LAB_TRACKER_ADDRESS", "IN_HOUSE_LABS", "SYNC_START_DATE", "PATIENT_FORMAT", "SHARED_SECRET", "SEND_TEST")
+$SettingNames = @("DEVELOPER_KEY", "CUSTOMER_KEY", "OPEN_DENTAL_ADDRESS", "API_PLAN", "LAB_SYNC", "LAB_TRACKER_ADDRESS", "IN_HOUSE_LABS", "SYNC_START_DATE", "PATIENT_FORMAT", "SEND_PATIENT_NUMBER", "SHARED_SECRET", "SEND_TEST")
 
 # Reads NAME=value lines (comments start with #). Returns only the values filled in.
 function Read-Settings([string]$file) {
@@ -565,6 +565,15 @@ try {
       $fmt = if ((Ask "Choose 1 or 2" $fmtDefault) -eq "2") { "initials" } else { "initial-last" }
     }
 
+    # Patient number (Open Dental's PatNum): only when asked for; otherwise keep what was saved.
+    $patNum = if ($ls -and $ls.sendPatNum) { "1" } else { "0" }
+    if ($auto -and $st['SEND_PATIENT_NUMBER']) {
+      if (Is-No $st['SEND_PATIENT_NUMBER']) { $patNum = "0" }
+      elseif ($st['SEND_PATIENT_NUMBER'] -match '^\s*(y|yes)\s*$') { $patNum = "1" }
+      else { Warn "SEND_PATIENT_NUMBER should be yes or no; keeping the saved choice." }
+    }
+    if ($patNum -eq "1") { Good "Open Dental's patient number (PatNum) is sent with each case" }
+
     # Shared secret
     $newSecret = $false
     $fileSecret = if ($auto -and $st['SHARED_SECRET']) { Clean-Key $st['SHARED_SECRET'] } else { "" }
@@ -597,7 +606,7 @@ try {
     }
 
     if ($auto -and (Is-No $st['SEND_TEST'])) { $sendTest = $false }
-    $writeEnv = @{ SETUP_LABSYNC = "1"; SETUP_TRACKER_URL = $url; SETUP_IN_HOUSE = $inHouse; SETUP_SYNC_FROM = $from; SETUP_PATIENT_FORMAT = $fmt }
+    $writeEnv = @{ SETUP_LABSYNC = "1"; SETUP_TRACKER_URL = $url; SETUP_IN_HOUSE = $inHouse; SETUP_SYNC_FROM = $from; SETUP_PATIENT_FORMAT = $fmt; SETUP_SEND_PATNUM = $patNum }
   } elseif (-not $syncOn) {
     $writeEnv = @{ SETUP_LABSYNC = "0" }
   }

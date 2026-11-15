@@ -76,6 +76,8 @@ function buildConfig(raw, env) {
       inHouseLabs: inHouse,
       patientFormat: env.SETUP_PATIENT_FORMAT || "initial-last",
     };
+    if (env.SETUP_SEND_PATNUM === "1") cfg.labSync.sendPatNum = true;
+    else if (env.SETUP_SEND_PATNUM === "0") cfg.labSync.sendPatNum = false;
     if (cfg.labSync.intervalMinutes === undefined) cfg.labSync.intervalMinutes = 5;
     if (cfg.labSync.keepDays === undefined) cfg.labSync.keepDays = 30;
     if (cfg.labSync.readyNote === undefined) cfg.labSync.readyNote = "Lab case ready to deliver";
@@ -123,6 +125,7 @@ async function main(argv = process.argv.slice(2), env = process.env) {
                 syncFrom: ls.syncFrom || "",
                 inHouseLabs: (ls.inHouseLabs || []).join(","),
                 patientFormat: ls.patientFormat || "initial-last",
+                sendPatNum: ls.sendPatNum === true,
               }
             : null,
         });

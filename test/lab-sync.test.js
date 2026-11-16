@@ -124,7 +124,8 @@ test("push sends only the agreed fields", async (t) => {
     { patient: a.patient, lab: a.lab, inHouse: a.lab_in_house, due: a.due, seat: a.seat, sent: a.sent },
     { patient: "J. Smith", lab: "TDC In-house", inHouse: true, due: "2026-11-18", seat: "2026-11-20", sent: null }
   );
-  const text = JSON.stringify(push);
+  // The random case key and nonce are hex and can contain "501"/"502" by chance; check everything else.
+  const text = JSON.stringify(push.cases.map(({ key, ...rest }) => rest));
   for (const banned of ["501", "502", "7001", "7002", "patnum", "PatNum", "LabCaseNum", "AptNum", "Birthdate", "smith\""]) assert.ok(!text.includes(banned), banned);
   assert.equal(tracker.calls.filter((c) => c.op === "ack").length, 0); // no events, no ack
 });
@@ -193,7 +194,7 @@ test("sendPatNum adds only the PatNum", async (t) => {
   await run();
   const push = tracker.calls.find((c) => c.op === "push");
   assert.deepEqual(push.cases.map((c) => c.patnum), [7001, 7002]);
-  const text = JSON.stringify(push);
+  const text = JSON.stringify(push.cases.map(({ key, ...rest }) => rest));
   for (const banned of ["501", "502", "LabCaseNum", "AptNum", "Birthdate"]) assert.ok(!text.includes(banned), banned);
 });
 

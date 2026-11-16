@@ -8,7 +8,7 @@
  */
 
 const { ODError, redact, recordId, validDate } = require("./odclient");
-const { buildReport } = require("./reports");
+const { runReport } = require("./reports");
 
 const READ = { readOnlyHint: true, openWorldHint: true };
 const WRITE = { readOnlyHint: false, destructiveHint: false, openWorldHint: true };
@@ -153,7 +153,7 @@ function buildLabTools(od, { allowWrites = false } = {}) {
         "Lab case board: every case not yet checked, with status (not_sent, at_lab, received_not_checked), due date, overdue flag, and seat_risk when the seat appointment is within days_ahead days but the case isn't back.",
       inputSchema: obj({ lab_num: int("Only this lab."), days_ahead: int("Seat-risk window in days. Default 7.") }),
       run: async (a) =>
-        outPage(await od.shortQuery(buildReport("lab_cases_open", { lab: recordId("lab_num", a.lab_num, { required: false }), days_ahead: a.days_ahead }))),
+        outPage(await runReport(od, "lab_cases_open", { lab: recordId("lab_num", a.lab_num, { required: false }), days_ahead: a.days_ahead })),
     },
 
     // -------------------------------------------------------------- changes

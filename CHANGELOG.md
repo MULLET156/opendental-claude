@@ -1,8 +1,16 @@
 # Changelog
 
-## 0.8.3 — 2026-11-14
+## 0.9.0 — 2026-11-15
 
-- **Lab tracker sync can send the patient number:** with `"sendPatNum": true` in `labSync` (Windows setup: `SEND_PATIENT_NUMBER=yes` in `settings.txt`), each case also carries Open Dental's PatNum so staff can find the patient. Off by default; date of birth, chart number and other Open Dental numbers are still never sent.
+For the TDC Office web apps (design stage). See `docs/tdc-office.md`.
+
+- **Gateway mode for `core/`:** `createClient({ gatewayUrl, gatewayKey })` (or `createGatewayClient`) gives the same client interface, but every call goes through the gateway with the module's own key. The existing tools (notes, group notes, planning, priorities, status, read-back checks) work unchanged. `runReport()` runs a named report on any client (gateway, direct or demo). `checkStage()` makes a module refuse to start in `TDC_STAGE=design` unless the gateway is the fake one.
+- **Demo gateway with fake data:** `npm start` (Hostinger Node.js app) and `npm run dev` / `start-demo.cmd` (this computer, published test keys). A made-up office with a schedule today, planned treatment, insurance maximums and x-ray limits, benefits used, unsigned notes and lab cases; writes work and show up in reports. It never talks to real Open Dental and refuses Open Dental keys. `/health` now includes `"fake"` (always `false` on the real gateway).
+- **Reports:** `daysheet`, `unscheduled_treatment` (hygiene left out by default; `reportDefaults` in the gateway config can set the office's list), `no_future_appointment`, `xray_history` (last BWX/FMX/pano/PA, the plan's frequency limit and next-covered date), `insurance_remaining` (an estimate), `unsigned_notes`. Reports now list their output columns.
+- **Module presets:** `node gateway/cli.js new-key daysheet` (also `finder`, `voice`, `numbers`) prints a config entry with that module's narrowest permissions. Only Voice Charting may write.
+- **`scripts/sync-core.js`** for module repos: copies `core/` at a released version (or a test build) into `vendor/opendental-core/` with `VERSION` and `CHECKSUMS`.
+- The Windows gateway download leaves out the demo.
+- **Lab tracker sync can send the patient number** (was 0.8.3): with `"sendPatNum": true` in `labSync` (Windows setup: `SEND_PATIENT_NUMBER=yes` in `settings.txt`), each case also carries Open Dental's PatNum so staff can find the patient. Off by default; date of birth, chart number and other Open Dental numbers are still never sent.
 
 ## 0.8.2 — 2026-11-14
 

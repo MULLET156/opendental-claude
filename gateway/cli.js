@@ -3,7 +3,9 @@
 /**
  * Gateway helper commands.
  *
- *   node gateway/cli.js new-key "<app name>"   create an app key and print its config entry
+ *   node gateway/cli.js new-key "<app name>" [--preset daysheet|finder|voice|numbers]
+ *                                              create an app key and print its config entry (a TDC Office
+ *                                              module's preset gives it that module's narrowest permissions)
  *   node gateway/cli.js hash <key>             print the hash of an existing key
  *   node gateway/cli.js check [config.json]    validate the config file
  *   node gateway/cli.js new-secret             create a LAB_SYNC_SECRET for the lab tracker sync
@@ -15,20 +17,30 @@
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { newKey, hashKey, loadConfig, loadEnvFile, ConfigError } = require("./config");
+const { presetApp, PRESETS } = require("./presets");
 
 const [cmd, arg] = process.argv.slice(2);
 
 switch (cmd) {
   case "new-key": {
-    const name = arg || "my-app";
+    const name = arg && !arg.startsWith("--") ? arg : "my-app";
+    const pi = process.argv.indexOf("--preset");
+    const preset = pi > 0 ? process.argv[pi + 1] : PRESETS[name] && name !== "dev" ? name : null;
+    if (preset && (!PRESETS[preset] || preset === "dev")) {
+      console.error(`Unknown preset "${preset}". Use one of: ${Object.keys(PRESETS).filter((p) => p !== "dev").join(", ")}`);
+      process.exit(1);
+    }
     const key = newKey();
-    const entry = {
-      name,
-      keyHash: hashKey(key),
-      allow: [{ methods: ["GET"], paths: ["/appointments", "/providers", "/operatories"] }],
-      reports: [],
-      rawSql: false,
-    };
+    const entry = preset
+      ? presetApp(name, preset, hashKey(key))
+      : {
+          name,
+          keyHash: hashKey(key),
+          allow: [{ methods: ["GET"], paths: ["/appointments", "/providers", "/operatories"] }],
+          reports: [],
+          rawSql: false,
+        };
+    if (preset) console.log(`Using the "${preset}" preset: ${PRESETS[preset].description}\n`);
     console.log(`App key for "${name}" (shown once; store it in that app's server-side settings):\n\n  ${key}\n`);
     console.log("Add this to the \"apps\" list in gateway.config.json, then adjust what it may do:\n");
     console.log(JSON.stringify(entry, null, 2));

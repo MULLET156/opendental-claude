@@ -7,6 +7,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { validateLabSync, SyncError } = require("./lab-sync");
+const { parseReportParams } = require("../core/reports");
 
 const METHODS = ["GET", "POST", "PUT", "DELETE"];
 
@@ -69,6 +70,7 @@ function validateConfig(raw, { requireApps = true } = {}) {
     maxBodyBytes: Number(raw.maxBodyBytes || 1024 * 1024),
     corsOrigins: Array.isArray(raw.corsOrigins) ? raw.corsOrigins : [],
     openDental: { plan: "standard", minIntervalMs: null, ...(raw.openDental || {}) },
+    reportDefaults: {},
     apps: [],
   };
   if (!Number.isInteger(cfg.listen.port) || cfg.listen.port < 1 || cfg.listen.port > 65535) {
@@ -87,6 +89,19 @@ function validateConfig(raw, { requireApps = true } = {}) {
   }
   for (const o of cfg.corsOrigins) {
     if (typeof o !== "string" || !/^https?:\/\/[^/]+$/.test(o)) throw new ConfigError(`corsOrigins entry "${o}" must look like https://app.example.com`);
+  }
+
+  // Office-wide report defaults, e.g. { "unscheduled_treatment": { "hygiene_codes": ["D1110", ...] } }.
+  if (raw.reportDefaults !== undefined) {
+    if (!raw.reportDefaults || typeof raw.reportDefaults !== "object" || Array.isArray(raw.reportDefaults)) throw new ConfigError("reportDefaults must be an object.");
+    for (const [name, defaults] of Object.entries(raw.reportDefaults)) {
+      try {
+        parseReportParams(name, defaults, { partial: true });
+      } catch (e) {
+        throw new ConfigError(`reportDefaults.${name}: ${e.message}`);
+      }
+    }
+    cfg.reportDefaults = raw.reportDefaults;
   }
 
   const apps = Array.isArray(raw.apps) ? raw.apps : [];

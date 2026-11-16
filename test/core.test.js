@@ -126,10 +126,11 @@ test("client: paces cloud-style requests", async () => {
 });
 
 test("reports: every report builds valid read-only SQL", () => {
-  const sample = { from: "2026-01-01", to: "2026-01-31", codes: ["D2740", "D2950"], patient: 5, since: "2026-11-15" };
+  const sample = { from: "2026-01-01", to: "2026-01-31", codes: ["D2740", "D2950"], patient: 5, since: "2026-11-15", date: "2026-11-16" };
   for (const [name, def] of Object.entries(REPORTS)) {
     const params = {};
     for (const [k, s] of Object.entries(def.params)) if (s.required) params[k] = sample[k];
+    if (def.check) params.patients = [1, 2];
     const sql = buildReport(name, params);
     assert.doesNotThrow(() => guardReadOnlySql(sql), name);
   }

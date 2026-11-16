@@ -7,6 +7,7 @@ Connect [Open Dental](https://www.opendental.com/) to Claude, and to the apps yo
 | **Claude connector** (`opendental.mcpb`) | A Claude desktop extension. Ask Claude about the schedule, patients, chart, A/R, claims and production; optionally let it book or move appointments, write clinical notes, and enter treatment plans after you approve each change. | Dentists, office managers |
 | **Claude skills** (`opendental` plugin) | Teaches Claude how a dental office works with Open Dental: day sheets, open slots, group notes, treatment planning, aging buckets, net production, recall. | Anyone using the connector |
 | **App gateway** (`gateway/`) | A small web service your own apps call to read from and write to Open Dental, with a separate key and permissions for each app, built-in reports, and an audit log. | Practices and developers building their own tools |
+| **Demo gateway** (`npm start`, `npm run dev`) | The same gateway in front of a made-up dental office (fake data only), for building and trying apps without touching real patients. Its `/health` says `"fake": true`. See [docs/tdc-office.md](docs/tdc-office.md). | People building apps on the gateway |
 
 All three share one core (`core/`), so the safety rules are the same everywhere. There are **no dependencies** to install; everything runs on plain Node.js, and Claude desktop supplies its own copy for the connector.
 
@@ -186,24 +187,26 @@ These tools move protected health information. Read **[docs/hipaa-and-security.m
 core/          shared Open Dental client, safety checks, report catalog, Claude tools, MCP protocol
 extension/     Claude desktop extension (manifest + entry point)
 plugin/        Claude plugin: skills for schedule, patients, billing, production
-gateway/       app gateway server, config, CLI
-scripts/       build.js: packs dist/opendental.mcpb and dist/opendental.plugin (no dependencies)
+gateway/       app gateway server, config, CLI, module presets; demo/ = demo gateway with fake data
+scripts/       build.js (packs the downloads), dev-gateway.js (npm run dev), sync-core.js (for module repos)
+server.js      npm start: the demo gateway (fake data; never real Open Dental)
 test/          node:test suite with a fake Open Dental server
-docs/          gateway guide, lab tracker sync, HIPAA and security notes
+docs/          gateway guide, TDC Office (demo gateway, reports, gateway mode), lab tracker sync, HIPAA and security notes
 ```
 
 ## Develop
 
 ```bash
 npm test         # no install needed (Node 20+)
-npm run build    # writes dist/opendental.mcpb and dist/opendental.plugin
+npm run build    # writes dist/opendental.mcpb, dist/opendental.plugin and the Windows gateway zip
+npm run dev      # demo gateway with fake data on http://127.0.0.1:8787 (or double-click start-demo.cmd)
 ```
 
 Contributions welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Please report security issues privately as described in [SECURITY.md](SECURITY.md).
 
 ## Status
 
-Version 0.7.0. Built from Open Dental's published API documentation and tested against a simulated Open Dental server; first runs against real offices are underway. Please open an issue if an endpoint behaves differently on your version of Open Dental. Known items to confirm:
+Version 0.9.0. Built from Open Dental's published API documentation and tested against a simulated Open Dental server; first runs against real offices are underway. Please open an issue if an endpoint behaves differently on your version of Open Dental. Known items to confirm:
 
 - Request field names for appointment **Break** (`sendToUnscheduledList`) and **Confirm** (`confirmVal`).
 - Report totals vs. Open Dental's built-in Daily P&I and Aging reports (write-off dating follows your Report Setup).

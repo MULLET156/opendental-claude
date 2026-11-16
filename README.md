@@ -199,15 +199,22 @@ Contributions welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Please report sec
 
 ## Status
 
-Version 0.6.0. Built from Open Dental's published API documentation and tested against a simulated Open Dental server; first runs against real offices are underway. Please open an issue if an endpoint behaves differently on your version of Open Dental. Known items to confirm:
+Version 0.7.0. Built from Open Dental's published API documentation and tested against a simulated Open Dental server; first runs against real offices are underway. Please open an issue if an endpoint behaves differently on your version of Open Dental. Known items to confirm:
 
 - Request field names for appointment **Break** (`sendToUnscheduledList`) and **Confirm** (`confirmVal`).
 - Report totals vs. Open Dental's built-in Daily P&I and Aging reports (write-off dating follows your Report Setup).
 
 Known Open Dental API behaviors (found in live testing):
 
-- Breaking an appointment through the API adds Open Dental's automatic commlog but not the office's broken-appointment procedure or adjustment; add those in Open Dental if you use them.
-- The open-slot search can return times inside blockouts such as lunch; confirm suggested times in Open Dental.
+- Updating a procedure only accepts priority and diagnosis as definition numbers; text names are silently ignored on updates. The connector resolves names itself and reads every change back.
+- Breaking an appointment adds Open Dental's automatic commlog. The broken-appointment procedure (D9986/D9987) is added only with `break_type` and the office's Appts Preferences set; the broken-appointment adjustment is never posted by the API.
+- Open Dental's open-slot search ignores blockouts; the connector removes or trims slots that overlap them.
+- After a reschedule, the arrived/seated/dismissed placeholder times keep the old date (cosmetic).
+- Open Dental's query filter rejects some SQL functions, such as `REPEAT()`.
+
+**Every change is read back.** After each write the connector re-reads the record from Open Dental and reports an error if the change didn't take, instead of reporting success.
+
+**Treatment priorities:** a procedure's own priority (shown in the Chart) and its plan-item priority (orders the treatment plan) are kept in sync by default.
 
 ## Credits
 

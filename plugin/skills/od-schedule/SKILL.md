@@ -19,7 +19,7 @@ Useful summaries: count of scheduled patients, new patients (`IsNewPatient`), un
 
 - Call `od_find_open_slots` with the date range and, when known, `prov_num`, `op_num`, and `length_minutes`.
 - Slots already account for a provider working across several operatories.
-- Open Dental's slot search can return times inside blockouts (lunch, meetings). Before offering or booking a slot, check it against that day's schedule with `od_get_appointments` and the office's known blockouts, and tell the user to confirm the time in Open Dental.
+- Open Dental's own slot search ignores blockouts (lunch, meetings); `od_find_open_slots` removes or trims slots that overlap a blockout and lists them under `removed_for_blockouts`. If it returns a `warning` that blockouts couldn't be read, say so and have the user confirm the time in Open Dental.
 - For "who could fill this opening", pair the slot with `od_get_asap_list`.
 
 ## Changing appointments (writes)
@@ -35,6 +35,8 @@ Before every write:
 Rules:
 - Book only into slots `od_find_open_slots` shows as open, unless the user explicitly says to double-book.
 - Break an appointment only when the user says the patient no-showed or cancelled; ask whether to send it to the Unscheduled List.
-- Breaking through the API adds Open Dental's automatic commlog but **not** the office's broken-appointment procedure or adjustment. After breaking, tell the user to add those in Open Dental if the office uses them.
+- Ask whether it was a no-show or a short-notice cancellation: `break_type: "Missed"` adds D9986 and `"Cancelled"` adds D9987, if the office has a broken appointment procedure set in Appts Preferences. The API never posts the broken-appointment adjustment; tell the user to add it in Open Dental if the office uses one.
+- After moving an appointment, Open Dental keeps the old date on the arrived/seated/dismissed placeholder times. That's cosmetic.
+- Every schedule change is read back. If a tool says Open Dental "did not apply" it, the change was NOT made; say so.
 - Log what happened with `od_add_commlog` when the user mentions a call or text (e.g. "Pt called to reschedule"), after confirming the note text.
 - Never change appointments in bulk from a single instruction; walk through them one at a time.

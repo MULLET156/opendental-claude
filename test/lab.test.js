@@ -37,7 +37,7 @@ test("reads: labs with turnarounds, cases, open board", async (t) => {
   assert.deepEqual(labs.results.map((l) => l.Description), ["Smile Lab"]);
   assert.equal(labs.results[0].turnarounds[0].days_actual, 9);
   assert.equal((await run("od_list_labs", { include_hidden: true })).count, 2);
-  assert.equal((await run("od_get_lab_cases", { pat_num: 1 })).count, 6);
+  assert.equal((await run("od_get_lab_cases", { pat_num: 1 })).count, 7);
   await assert.rejects(run("od_get_lab_cases", {}), /pat_num, apt_num or lab_num/);
   const board = await run("od_get_open_lab_cases", { days_ahead: 10 });
   assert.ok(Array.isArray(board.results));
@@ -89,21 +89,64 @@ test("create a lab case: checks lab and appointments, computes due from turnarou
   assert.equal(writes().length, n);
 });
 
-test("status steps go in order and never overwrite", async (t) => {
-  const { run, writes } = await setup(t);
-  await run("od_update_lab_case_status", { pat_num: 1, lab_case_num: 1, step: "received", when: "2026-11-13 14:05" });
-  assert.deepEqual(writes().at(-1).body, { DateTimeRecd: "2026-11-13 14:05:00" });
-  await run("od_update_lab_case_status", { pat_num: 1, lab_case_num: 2, step: "sent" });
-  assert.match(writes().at(-1).body.DateTimeSent, /^\d{4}-/);
-  const n = writes().length;
+test("status steps go in order; overwrite only when asked; read back", async (t) => {
+  const { run, writes, od } = await setup(t);
+  const n0 = writes().length;
   await assert.rejects(run("od_update_lab_case_status", { pat_num: 1, lab_case_num: 2, step: "received" }), /never marked sent/);
-  await assert.rejects(run("od_update_lab_case_status", { pat_num: 1, lab_case_num: 1, step: "checked" }), /hasn't been received/);
-  await assert.rejects(run("od_update_lab_case_status", { pat_num: 1, lab_case_num: 5, step: "received" }), /already marked received/);
+  await assert.rejects(run("od_update_lab_case_status", { pat_num: 1, lab_case_num: 3, step: "checked" }), /hasn't been received/);
+  await assert.rejects(run("od_update_lab_case_status", { pat_num: 1, lab_case_num: 5, step: "received" }), /already marked received.*overwrite=true/);
   await assert.rejects(run("od_update_lab_case_status", { pat_num: 2, lab_case_num: 1, step: "sent" }), /different patient/);
   await assert.rejects(run("od_update_lab_case", { pat_num: 1, lab_case_num: 1 }), /Nothing to change/);
-  assert.equal(writes().length, n);
+  assert.equal(writes().length, n0);
+
+  const r = await run("od_update_lab_case_status", { pat_num: 1, lab_case_num: 1, step: "received", when: "2026-11-13 14:05" });
+  assert.equal(r.verified, "Read back from Open Dental after saving.");
+  assert.equal(od.state.labcases[1].DateTimeRecd, "2026-11-13 14:05:00");
+  await run("od_update_lab_case_status", { pat_num: 1, lab_case_num: 2, step: "sent" });
+  assert.match(od.state.labcases[2].DateTimeSent, /^\d{4}-/);
+  const o = await run("od_update_lab_case_status", { pat_num: 1, lab_case_num: 5, step: "received", when: "2020-01-01", overwrite: true });
+  assert.equal(o.replaced, "2019-03-10 10:00:00 → 2020-01-01 00:00:00");
   await run("od_update_lab_case", { pat_num: 1, lab_case_num: 1, due: "2026-12-01", instructions: "Rush" });
   assert.deepEqual(writes().at(-1).body, { DateTimeDue: "2026-12-01 00:00:00", Instructions: "Rush" });
+
+  od.state.ignoreLabPut = true;
+  await assert.rejects(run("od_update_lab_case_status", { pat_num: 1, lab_case_num: 3, step: "received" }), /did not apply.*NOT made/);
+});
+
+test("unlink a lab case from another patient's appointment", async (t) => {
+  const { run, writes, od } = await setup(t);
+  const r = await run("od_update_lab_case", { pat_num: 3, lab_case_num: 8, unlink_appointment: true });
+  assert.deepEqual(writes().at(-1).body, { AptNum: 0 });
+  assert.equal(od.state.labcases[8].AptNum, 0);
+  assert.equal(r.appointment, "50 → none");
+  const n = writes().length;
+  await assert.rejects(run("od_update_lab_case", { pat_num: 3, lab_case_num: 8, unlink_appointment: true }), /isn't linked to an appointment/);
+  await assert.rejects(run("od_update_lab_case", { pat_num: 3, lab_case_num: 8, unlink_planned_appointment: true }), /isn't linked to a planned/);
+  await assert.rejects(run("od_update_lab_case", { pat_num: 1, lab_case_num: 8, unlink_appointment: true }), /different patient/);
+  await assert.rejects(run("od_update_lab_case", { pat_num: 1, lab_case_num: 1, apt_num: 52, unlink_appointment: true }), /either apt_num or unlink/);
+  assert.equal(writes().length, n);
+});
+
+test("re-date already-received cases to a fixed date, preview first", async (t) => {
+  const { run, writes, od } = await setup(t);
+  const sql = require("../core/reports").buildReport("lab_cases_received_on_appointment_date", { before: "2020-01-01" });
+  assert.match(sql, /lc\.DateTimeRecd = a\.AptDateTime AND a\.AptStatus = 2 AND a\.AptDateTime < '2020-01-01'/);
+  // Without overwrite, already-received cases are skipped.
+  let p = await run("od_mark_lab_cases_received", { lab_case_nums: [9], received_date: "2020-01-01" });
+  assert.match(p.results[0].reason, /already received/);
+  p = await run("od_mark_lab_cases_received", { lab_case_nums: [9, 5, 1], received_date: "2020-01-01", overwrite_received: true, before: "2020-01-01" });
+  assert.equal(writes().length, 0);
+  const by = Object.fromEntries(p.results.map((r) => [r.LabCaseNum, r]));
+  assert.equal(by[9].result, "would re-date received");
+  assert.equal(by[9].OldReceivedDate, "2019-03-15 10:30:00");
+  assert.equal(by[9].ReceivedDate, "2020-01-01 00:00:00");
+  assert.equal(by[1].result, "would mark received");
+  const done = await run("od_mark_lab_cases_received", { lab_case_nums: [9, 5, 1], received_date: "2020-01-01", overwrite_received: true, before: "2020-01-01", preview: false });
+  assert.deepEqual(done.summary, { "re-dated received": 2, "marked received": 1 });
+  for (const n of [9, 5, 1]) assert.equal(od.state.labcases[n].DateTimeRecd, "2020-01-01 00:00:00");
+  // Running it again changes nothing.
+  const again = await run("od_mark_lab_cases_received", { lab_case_nums: [9], received_date: "2020-01-01", overwrite_received: true, preview: false });
+  assert.match(again.results[0].reason, /already received on 2020-01-01/);
 });
 
 test("cleanup: preview first, then only complete-appointment cases before the cutoff", async (t) => {

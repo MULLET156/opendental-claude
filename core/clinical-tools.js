@@ -167,6 +167,85 @@ function buildClinicalTools(od, { allowChartChanges = false } = {}) {
     return hit.DefNum;
   }
 
+  /** Priority name -> DefNum; "none" -> 0 (clears the priority). */
+  async function resolvePriority(name) {
+    if (!name) return undefined;
+    if (name.toLowerCase() === "none") return 0;
+    return priorityDefNum(name);
+  }
+
+  async function dxDefNum(name) {
+    if (!name) return undefined;
+    const defs = await definitions(16);
+    const hit = defs.find((d) => String(d.ItemName).toLowerCase() === name.toLowerCase());
+    if (!hit) {
+      throw new ODError(`No diagnosis named "${name}". Office diagnoses: ${defs.map((d) => d.ItemName).join(", ") || "none set up"}.`, { code: "bad_input" });
+    }
+    return hit.DefNum;
+  }
+
+  const norm = (v) => String(v ?? "").trim().toUpperCase().replace(/\s+/g, "");
+  function procField(p, key) {
+    if (key === "ProcStatus") return statusOf(p);
+    if (key === "procCode") return p.procCode ?? p.ProcCode;
+    if (key === "ProcDate") return String(p.ProcDate || "").slice(0, 10);
+    return p[key];
+  }
+
+  /**
+   * Read a procedure back and confirm every requested field took effect.
+   * Open Dental can answer 200 without applying a field; that must never look like success.
+   */
+  async function verifyProc(procNum, expected) {
+    const p = await od.request("GET", `/procedurelogs/${procNum}`);
+    const bad = [];
+    for (const [k, want] of Object.entries(expected)) {
+      const got = procField(p, k);
+      const ok = typeof want === "number" ? Number(got) === want : norm(got) === norm(want);
+      if (!ok) bad.push(`${k} should be ${want} but Open Dental still has ${got === undefined || got === "" ? "nothing" : got}`);
+    }
+    if (bad.length) {
+      throw new ODError(`Open Dental accepted the request for procedure ${procNum} but did not apply it: ${bad.join("; ")}. Treat this change as NOT made.`, { code: "not_applied" });
+    }
+    return p;
+  }
+
+  /** Fields sent in a procedure body that can be read back. */
+  function expectedFrom(body) {
+    const keys = ["ProcStatus", "procCode", "ToothNum", "Surf", "ToothRange", "Priority", "Dx", "ProvNum", "ProcDate", "AptNum"];
+    return Object.fromEntries(keys.filter((k) => body[k] !== undefined).map((k) => [k, body[k]]));
+  }
+
+  async function planAttaches(planNum) {
+    const rows = await od.request("GET", "/treatplanattaches", { params: { TreatPlanNum: planNum } });
+    return Array.isArray(rows) ? rows : [];
+  }
+
+  /** Set a plan item's priority and confirm it. */
+  async function setAttachPriority(planNum, attach, defNum) {
+    await od.request("PUT", `/treatplanattaches/${recordId("TreatPlanAttachNum", attach.TreatPlanAttachNum)}`, { body: { Priority: defNum } });
+    const after = (await planAttaches(planNum)).find((x) => Number(x.TreatPlanAttachNum) === Number(attach.TreatPlanAttachNum));
+    if (!after || Number(after.Priority) !== defNum) {
+      throw new ODError(`Open Dental did not apply priority ${defNum} to procedure ${attach.ProcNum} on plan ${planNum}. Treat this change as NOT made.`, { code: "not_applied" });
+    }
+  }
+
+  /** Keep a procedure's plan-item priorities in step with its own priority (Active and Inactive plans). */
+  async function syncPlanItems(patNum, procNum, defNum) {
+    const plans = await od.request("GET", "/treatplans", { params: { PatNum: patNum } });
+    const updated = [];
+    for (const plan of Array.isArray(plans) ? plans : []) {
+      if (plan.TPStatus === "Saved") continue;
+      const planNum = Number(plan.TreatPlanNum);
+      for (const at of (await planAttaches(planNum)).filter((x) => Number(x.ProcNum) === procNum)) {
+        if (Number(at.Priority) === defNum) continue;
+        await setAttachPriority(planNum, at, defNum);
+        updated.push(planNum);
+      }
+    }
+    return updated;
+  }
+
   async function getProc(procNum, patNum) {
     const p = await od.request("GET", `/procedurelogs/${procNum}`);
     if (!p || typeof p !== "object" || Array.isArray(p)) throw new ODError(`Procedure ${procNum} was not found.`, { code: "not_found" });
@@ -389,9 +468,10 @@ function buildClinicalTools(od, { allowChartChanges = false } = {}) {
         if (surf) body.Surf = surf;
         if (range) body.ToothRange = range;
         const pri = checkName("priority", a.priority);
-        const dx = checkName("diagnosis", a.diagnosis);
-        if (pri) body.priority = pri;
-        if (dx) body.dxName = dx;
+        const priNum = await resolvePriority(pri);
+        const dxNum = await dxDefNum(checkName("diagnosis", a.diagnosis));
+        if (priNum) body.Priority = priNum;
+        if (dxNum) body.Dx = dxNum;
         if (a.prov_num != null) body.ProvNum = recordId("prov_num", a.prov_num);
         const planNum = recordId("treat_plan_num", a.treat_plan_num, { required: false });
         let plan;
@@ -403,17 +483,18 @@ function buildClinicalTools(od, { allowChartChanges = false } = {}) {
 
         const created = await od.request("POST", "/procedurelogs", { body });
         const procNum = Number(created && created.ProcNum);
-        const result = { procedure: created };
-        if (procNum && note) {
+        if (!procNum) throw new ODError("Open Dental did not return the new procedure's number; check the chart before retrying.", { code: "not_applied" });
+        const { PatNum, ProcDate, ...check } = body;
+        const result = { procedure: await verifyProc(procNum, expectedFrom(check)) };
+        if (note) {
           result.note = await od.request("POST", "/procnotes", { body: { PatNum: patNum, ProcNum: procNum, Note: note, isSigned: "false" } });
         }
-        if (procNum && plan) {
+        if (plan) {
           const attach = { TreatPlanNum: planNum, ProcNum: procNum };
-          const defNum = await priorityDefNum(pri);
-          if (defNum) attach.Priority = defNum;
+          if (priNum) attach.Priority = priNum;
           result.treatment_plan = await od.request("POST", "/treatplanattaches", { body: attach });
         }
-        return out(result);
+        return out(result, { verified: "Read back from Open Dental after saving." });
       },
     },
     {
@@ -429,9 +510,10 @@ function buildClinicalTools(od, { allowChartChanges = false } = {}) {
           tooth: str("New tooth."),
           surfaces: str("New surfaces."),
           tooth_range: str("New tooth range."),
-          priority: str("New priority name."),
+          priority: str("New priority name (from od_list_treatment_priorities), or 'none' to clear it."),
           diagnosis: str("New diagnosis name."),
           prov_num: int("New provider ProvNum."),
+          sync_plan_items: bool("Also set the same priority on this procedure's treatment-plan items. Default true."),
         },
         ["pat_num", "proc_num"]
       ),
@@ -451,13 +533,20 @@ function buildClinicalTools(od, { allowChartChanges = false } = {}) {
         if (tooth) body.ToothNum = tooth;
         if (surf) body.Surf = surf;
         if (range) body.ToothRange = range;
-        const pri = checkName("priority", a.priority);
-        const dx = checkName("diagnosis", a.diagnosis);
-        if (pri) body.priority = pri;
-        if (dx) body.dxName = dx;
+        const priNum = await resolvePriority(checkName("priority", a.priority));
+        const dxNum = await dxDefNum(checkName("diagnosis", a.diagnosis));
+        if (priNum !== undefined) body.Priority = priNum;
+        if (dxNum) body.Dx = dxNum;
         if (a.prov_num != null) body.ProvNum = recordId("prov_num", a.prov_num);
         if (!Object.keys(body).length) throw new ODError("Nothing to change.", { code: "bad_input" });
-        return out(await od.request("PUT", `/procedurelogs/${procNum}`, { body }));
+        await od.request("PUT", `/procedurelogs/${procNum}`, { body });
+        const after = await verifyProc(procNum, expectedFrom(body));
+        const extra = { verified: "Read back from Open Dental after saving." };
+        if (priNum !== undefined && a.sync_plan_items !== false) {
+          const plans = await syncPlanItems(patNum, procNum, priNum);
+          if (plans.length) extra.plan_items_updated = plans;
+        }
+        return out(after, extra);
       },
     },
     {
@@ -494,13 +583,14 @@ function buildClinicalTools(od, { allowChartChanges = false } = {}) {
       name: "od_add_to_treatment_plan",
       annotations: WRITE,
       description:
-        "CHART CHANGE. Group existing treatment-planned procedures into a treatment plan, optionally with a priority. Confirm the plan and procedures with the user first.",
+        "CHART CHANGE. Group existing treatment-planned procedures into a treatment plan, optionally with a priority. Procedures already on the plan get the new priority instead. With a priority, the procedures' own priority is set to match (sync_procedures, default true). To give different priorities to different items, use od_set_treatment_plan_priorities. Confirm the plan and procedures with the user first.",
       inputSchema: obj(
         {
           pat_num: int("PatNum"),
           treat_plan_num: int("TreatPlanNum"),
           proc_nums: intList("ProcNums of planned procedures to add."),
-          priority: str("Optional priority name for these procedures on the plan."),
+          priority: str("Optional priority name for these procedures on the plan, or 'none'."),
+          sync_procedures: bool("Also set the procedures' own priority to match. Default true."),
         },
         ["pat_num", "treat_plan_num", "proc_nums"]
       ),
@@ -520,14 +610,95 @@ function buildClinicalTools(od, { allowChartChanges = false } = {}) {
             throw new ODError(`Procedure ${n} is not treatment-planned (status ${statusOf(p)}). Nothing was changed.`, { code: "bad_input" });
           }
         }
-        const defNum = await priorityDefNum(checkName("priority", a.priority));
+        const defNum = await resolvePriority(checkName("priority", a.priority));
+        const existing = await planAttaches(planNum);
         const results = [];
         for (const n of nums) {
-          const body = { TreatPlanNum: planNum, ProcNum: n };
-          if (defNum) body.Priority = defNum;
-          results.push(await od.request("POST", "/treatplanattaches", { body }));
+          const at = existing.find((x) => Number(x.ProcNum) === n);
+          if (at) {
+            if (defNum === undefined || Number(at.Priority) === defNum) {
+              results.push({ ProcNum: n, result: "already on this plan" });
+            } else {
+              await setAttachPriority(planNum, at, defNum);
+              results.push({ ProcNum: n, result: "already on this plan; priority updated" });
+            }
+          } else {
+            const body = { TreatPlanNum: planNum, ProcNum: n };
+            if (defNum) body.Priority = defNum;
+            await od.request("POST", "/treatplanattaches", { body });
+            results.push({ ProcNum: n, result: "added" });
+          }
+          if (defNum !== undefined && a.sync_procedures !== false) {
+            await od.request("PUT", `/procedurelogs/${n}`, { body: { Priority: defNum } });
+            await verifyProc(n, { Priority: defNum });
+          }
         }
-        return out(results);
+        // Read back: every procedure must now be on the plan with the requested priority.
+        const after = await planAttaches(planNum);
+        for (const n of nums) {
+          const at = after.find((x) => Number(x.ProcNum) === n);
+          if (!at || (defNum !== undefined && Number(at.Priority) !== defNum)) {
+            throw new ODError(`Procedure ${n} is not on plan ${planNum}${defNum !== undefined ? ` with priority ${defNum}` : ""} after saving. Check the plan in Open Dental.`, { code: "not_applied" });
+          }
+        }
+        return out(results, { verified: "Read back from Open Dental after saving." });
+      },
+    },
+    {
+      name: "od_set_treatment_plan_priorities",
+      annotations: WRITE,
+      description:
+        "CHART CHANGE. Set the order of a treatment plan by giving groups of its procedures a priority, e.g. [{proc_nums:[crown #2, buildup #2], priority:'1'}, {proc_nums:[RCT #4], priority:'2'}]. Sets the plan items' priority (what orders the plan) and, by default, each procedure's own priority to match. Every procedure must already be on the plan. Checks everything before changing anything and reads every value back. Confirm the full ordering with the user first.",
+      inputSchema: obj(
+        {
+          pat_num: int("PatNum"),
+          treat_plan_num: int("TreatPlanNum"),
+          items: {
+            type: "array",
+            minItems: 1,
+            maxItems: 30,
+            items: obj({ proc_nums: intList("ProcNums in this group."), priority: str("Priority name, or 'none'.") }, ["proc_nums", "priority"]),
+            description: "Groups of procedures and the priority for each group.",
+          },
+          sync_procedures: bool("Also set each procedure's own priority. Default true."),
+        },
+        ["pat_num", "treat_plan_num", "items"]
+      ),
+      run: async (a) => {
+        needChart();
+        const patNum = recordId("pat_num", a.pat_num);
+        const planNum = recordId("treat_plan_num", a.treat_plan_num);
+        const plan = await getPlan(planNum, patNum);
+        if (plan.TPStatus === "Saved") throw new ODError("Saved (presented) plans are kept as they were; change the Active or Inactive plan instead.", { code: "forbidden" });
+        if (!Array.isArray(a.items) || !a.items.length || a.items.length > 30) throw new ODError("items must list 1-30 groups.", { code: "bad_input" });
+        // Validate everything first.
+        const attaches = await planAttaches(planNum);
+        const plan_ = [];
+        const seen = new Set();
+        for (const g of a.items) {
+          const defNum = await resolvePriority(checkName("priority", g && g.priority));
+          if (defNum === undefined) throw new ODError("Each group needs a priority.", { code: "bad_input" });
+          if (!Array.isArray(g.proc_nums) || !g.proc_nums.length) throw new ODError("Each group needs proc_nums.", { code: "bad_input" });
+          for (const raw of g.proc_nums) {
+            const n = recordId("proc_nums", raw);
+            if (seen.has(n)) throw new ODError(`Procedure ${n} is listed in more than one group.`, { code: "bad_input" });
+            seen.add(n);
+            await getProc(n, patNum);
+            const at = attaches.find((x) => Number(x.ProcNum) === n);
+            if (!at) throw new ODError(`Procedure ${n} is not on treatment plan ${planNum}; add it with od_add_to_treatment_plan first. Nothing was changed.`, { code: "bad_input" });
+            plan_.push({ n, at, defNum, name: g.priority });
+          }
+        }
+        const results = [];
+        for (const { n, at, defNum, name } of plan_) {
+          if (Number(at.Priority) !== defNum) await setAttachPriority(planNum, at, defNum);
+          if (a.sync_procedures !== false) {
+            await od.request("PUT", `/procedurelogs/${n}`, { body: { Priority: defNum } });
+            await verifyProc(n, { Priority: defNum });
+          }
+          results.push({ ProcNum: n, priority: name, DefNum: defNum });
+        }
+        return out(results, { verified: "Plan items and procedures read back from Open Dental after saving." });
       },
     },
     {
@@ -595,9 +766,16 @@ function buildClinicalTools(od, { allowChartChanges = false } = {}) {
           body.AptNum = aptNum;
         }
         const note = a.note ? checkText("note", a.note) : null;
+        const dxNum = await dxDefNum(dx);
+        if (dxNum) {
+          delete body.dxName;
+          body.Dx = dxNum;
+        }
         const created = await od.request("POST", "/procedurelogs", { body });
-        const result = { procedure: created, status: STATUS_NAMES[code] };
         const procNum = Number(created && created.ProcNum);
+        if (!procNum) throw new ODError("Open Dental did not return the new procedure's number; check the chart before retrying.", { code: "not_applied" });
+        const { PatNum: _p, ...check } = body;
+        const result = { procedure: await verifyProc(procNum, expectedFrom(check)), status: STATUS_NAMES[code] };
         if (procNum && note) result.note = await od.request("POST", "/procnotes", { body: { PatNum: patNum, ProcNum: procNum, Note: note, isSigned: "false" } });
         return out(result, code === "C" ? { charge: "Completed: the procedure fee posted to the patient's account." } : {});
       },
@@ -631,7 +809,8 @@ function buildClinicalTools(od, { allowChartChanges = false } = {}) {
         const body = { ProcStatus: code };
         if (a.date) body.ProcDate = a.date;
         else if (code === "C") body.ProcDate = today();
-        const result = await od.request("PUT", `/procedurelogs/${procNum}`, { body });
+        await od.request("PUT", `/procedurelogs/${procNum}`, { body });
+        const result = await verifyProc(procNum, expectedFrom(body));
         return out(result, {
           changed: `${STATUS_NAMES[from] || from} → ${STATUS_NAMES[code]}`,
           ...(code === "C" ? { charge: "Completed: the procedure fee posted to the patient's account." } : {}),
@@ -707,7 +886,12 @@ function buildClinicalTools(od, { allowChartChanges = false } = {}) {
             results.push({ tooth: label, result: `marked ${a.status.replace("_", " ")}` });
           }
         }
-        return out(results);
+        // Read back the chart and confirm every tooth is now in the requested state.
+        const after = await od.request("GET", "/toothinitials", { params: { PatNum: patNum } });
+        const now = new Set((Array.isArray(after) ? after : []).filter((r) => r.InitialType === kind).map((r) => String(r.ToothNum).toUpperCase()));
+        const wrong = [...new Set(teeth)].filter((t) => now.has(t) !== adding);
+        if (wrong.length) throw new ODError(`After saving, Open Dental's chart still doesn't show teeth ${wrong.join(", ")} as ${a.status.replace("_", " ")}. Check the chart in Open Dental.`, { code: "not_applied" });
+        return out(results, { verified: "Read back from Open Dental after saving." });
       },
     },
   ];

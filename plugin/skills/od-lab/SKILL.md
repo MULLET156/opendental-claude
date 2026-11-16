@@ -25,6 +25,10 @@ Empty dates in Open Dental show as 0001-01-01; say "not yet" rather than showing
 
 Never delete lab cases. If a case was cancelled, say so in its instructions with `od_update_lab_case` and leave the record.
 
+- **Wrong appointment link** (e.g. linked to another patient's appointment): `od_update_lab_case` with `unlink_appointment: true` (or `unlink_planned_appointment`). Show which appointment it points to now and get a yes.
+- **Replacing a recorded date:** `od_update_lab_case_status` refuses unless `overwrite: true`. Show the old and new date first.
+- Every lab change is read back; a "did not apply" answer means it was NOT made.
+
 ## Cleanup: cases never marked received
 
 For old cases whose appointment is Complete but the case was never marked received:
@@ -35,3 +39,9 @@ For old cases whose appointment is Complete but the case was never marked receiv
 4. Then batches of up to 50: preview, show the summary (would mark / skipped with reasons), get a yes for that batch, run with `preview: false`. The received date is the appointment's date; nothing is deleted.
 5. If a batch reports "Stopped early", stop and show the reason (keys, permissions, network) before doing anything else.
 6. Re-run the count to confirm it reached zero (or only the skipped cases remain), and report the final numbers.
+
+## Re-dating cases (e.g. cleaned-up cases to a fixed date)
+
+1. Find them: `od_run_report` `lab_cases_received_on_appointment_date` (cases whose received date equals their Complete appointment's date and time), with `before` as the cutoff; `count_only: "true"` for the total.
+2. Preview a batch: `od_mark_lab_cases_received` with `received_date` (e.g. "2020-01-01"), `overwrite_received: true`, the same `before`, preview on. The preview shows each case's old and new received date.
+3. After a clear yes, run with `preview: false`, batch by batch, then re-run the count (it should reach zero).

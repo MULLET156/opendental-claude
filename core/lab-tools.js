@@ -82,6 +82,19 @@ function buildLabTools(od, { allowWrites = false } = {}) {
     return c;
   }
 
+  /** Read a lab case back and confirm the fields took effect. */
+  async function verifyCase(num, expected) {
+    const c = await od.request("GET", `/labcases/${num}`);
+    const bad = [];
+    for (const [k, want] of Object.entries(expected)) {
+      const got = c && c[k];
+      const ok = typeof want === "number" ? Number(got) === want : String(got ?? "").trim() === String(want).trim();
+      if (!ok) bad.push(`${k} should be ${want} but Open Dental has ${got === undefined || got === "" ? "nothing" : got}`);
+    }
+    if (bad.length) throw new ODError(`Open Dental accepted the change to lab case ${num} but did not apply it: ${bad.join("; ")}. Treat this change as NOT made.`, { code: "not_applied" });
+    return c;
+  }
+
   async function getAppt(aptNum) {
     const a = await od.request("GET", `/appointments/${aptNum}`);
     if (!a || typeof a !== "object" || Array.isArray(a)) throw new ODError(`Appointment ${aptNum} was not found.`, { code: "not_found" });
@@ -199,13 +212,14 @@ function buildLabTools(od, { allowWrites = false } = {}) {
       name: "od_update_lab_case_status",
       annotations: WRITE,
       description:
-        "CHANGE. Mark a lab case sent, received (back from the lab) or checked (quality-checked, ready to seat), now or at a given date/time. Steps go in order: sent, then received, then checked. Confirm with the user first.",
+        "CHANGE. Mark a lab case sent, received (back from the lab) or checked (quality-checked, ready to seat), now or at a given date/time. Steps go in order: sent, then received, then checked. A step already recorded is only replaced with overwrite=true (show the old and new date and get a yes). Confirm with the user first.",
       inputSchema: obj(
         {
           pat_num: int("PatNum"),
           lab_case_num: int("LabCaseNum"),
           step: { type: "string", enum: ["sent", "received", "checked"], description: "Which step happened." },
           when: str("yyyy-MM-dd or yyyy-MM-dd HH:mm. Default now."),
+          overwrite: bool("Replace a date already recorded for this step. Default false."),
         },
         ["pat_num", "lab_case_num", "step"]
       ),
@@ -216,17 +230,22 @@ function buildLabTools(od, { allowWrites = false } = {}) {
         const c = await getCase(num, patNum);
         const field = { sent: "DateTimeSent", received: "DateTimeRecd", checked: "DateTimeChecked" }[a.step];
         if (!field) throw new ODError("step must be sent, received or checked.", { code: "bad_input" });
-        if (!isBlankDate(c[field])) throw new ODError(`Lab case ${num} is already marked ${a.step} (${c[field]}). Nothing was changed.`, { code: "bad_input" });
+        if (!isBlankDate(c[field]) && a.overwrite !== true) {
+          throw new ODError(`Lab case ${num} is already marked ${a.step} (${c[field]}). Pass overwrite=true to replace that date. Nothing was changed.`, { code: "bad_input" });
+        }
         if (a.step === "received" && isBlankDate(c.DateTimeSent)) throw new ODError(`Lab case ${num} was never marked sent; mark it sent first.`, { code: "bad_input" });
         if (a.step === "checked" && isBlankDate(c.DateTimeRecd)) throw new ODError(`Lab case ${num} hasn't been received yet; mark it received first.`, { code: "bad_input" });
-        return out(await od.request("PUT", `/labcases/${num}`, { body: { [field]: dateTime("when", a.when) || nowLocal() } }));
+        const value = dateTime("when", a.when) || nowLocal();
+        await od.request("PUT", `/labcases/${num}`, { body: { [field]: value } });
+        const after = await verifyCase(num, { [field]: value });
+        return out(after, { verified: "Read back from Open Dental after saving.", ...(isBlankDate(c[field]) ? {} : { replaced: `${c[field]} → ${value}` }) });
       },
     },
     {
       name: "od_update_lab_case",
       annotations: WRITE,
       description:
-        "CHANGE. Change a lab case's due date, instructions, seat appointment (patient's Scheduled appointment), lab, provider, fee or invoice number. Confirm the before and after with the user first.",
+        "CHANGE. Change a lab case's due date, instructions, seat appointment (patient's Scheduled appointment), lab, provider, fee or invoice number, or unlink its appointment or planned appointment (e.g. when it points at another patient's appointment). Confirm the before and after with the user first.",
       inputSchema: obj(
         {
           pat_num: int("PatNum"),
@@ -238,6 +257,8 @@ function buildLabTools(od, { allowWrites = false } = {}) {
           prov_num: int("New provider ProvNum."),
           lab_fee: num("Lab fee."),
           invoice_num: str("Invoice number."),
+          unlink_appointment: bool("Remove the link to its appointment (AptNum becomes 0)."),
+          unlink_planned_appointment: bool("Remove the link to its planned appointment."),
         },
         ["pat_num", "lab_case_num"]
       ),
@@ -245,7 +266,7 @@ function buildLabTools(od, { allowWrites = false } = {}) {
         needWrites();
         const patNum = recordId("pat_num", a.pat_num);
         const num = recordId("lab_case_num", a.lab_case_num);
-        await getCase(num, patNum);
+        const before = await getCase(num, patNum);
         const body = {};
         const due = dateTime("due", a.due);
         if (due) body.DateTimeDue = due;
@@ -253,7 +274,16 @@ function buildLabTools(od, { allowWrites = false } = {}) {
           if (typeof a.instructions !== "string" || a.instructions.length > 5000) throw new ODError("instructions must be text under 5000 characters.", { code: "bad_input" });
           body.Instructions = a.instructions;
         }
-        if (a.apt_num != null) body.AptNum = (await checkAppt(recordId("apt_num", a.apt_num), patNum, "Scheduled")).AptNum;
+        if (a.apt_num != null && a.unlink_appointment) throw new ODError("Give either apt_num or unlink_appointment, not both.", { code: "bad_input" });
+        if (a.apt_num != null) body.AptNum = Number((await checkAppt(recordId("apt_num", a.apt_num), patNum, "Scheduled")).AptNum);
+        if (a.unlink_appointment) {
+          if (!Number(before.AptNum)) throw new ODError(`Lab case ${num} isn't linked to an appointment. Nothing was changed.`, { code: "bad_input" });
+          body.AptNum = 0;
+        }
+        if (a.unlink_planned_appointment) {
+          if (!Number(before.PlannedAptNum)) throw new ODError(`Lab case ${num} isn't linked to a planned appointment. Nothing was changed.`, { code: "bad_input" });
+          body.PlannedAptNum = 0;
+        }
         if (a.lab_num != null) {
           body.LaboratoryNum = recordId("lab_num", a.lab_num);
           await od.request("GET", `/laboratories/${body.LaboratoryNum}`);
@@ -265,18 +295,24 @@ function buildLabTools(od, { allowWrites = false } = {}) {
         }
         if (a.invoice_num) body.InvoiceNum = String(a.invoice_num).slice(0, 100);
         if (!Object.keys(body).length) throw new ODError("Nothing to change.", { code: "bad_input" });
-        return out(await od.request("PUT", `/labcases/${num}`, { body }));
+        await od.request("PUT", `/labcases/${num}`, { body });
+        const after = await verifyCase(num, body);
+        const notes = {};
+        if ("AptNum" in body) notes.appointment = `${Number(before.AptNum) || "none"} → ${body.AptNum || "none"}`;
+        return out(after, { verified: "Read back from Open Dental after saving.", ...notes });
       },
     },
     {
       name: "od_mark_lab_cases_received",
       annotations: WRITE,
       description:
-        "CHANGE (cleanup). Mark old lab cases as received using their linked appointment's date, for cases whose appointment is Complete but the case was never marked received. Up to 50 per call. Each case is checked first and skipped (with the reason) if it has no linked appointment, the appointment isn't Complete, it's already received, or the appointment is on/after 'before'. Never deletes. With preview=true (the default) nothing is written: show the user the preview, then call again with preview=false after a clear yes. Find candidates with od_run_report 'lab_cases_unreceived_completed'.",
+        "CHANGE (cleanup). Mark old lab cases as received, for cases whose linked appointment is Complete. The received date is the appointment's date, or received_date if given. Already-received cases are skipped unless overwrite_received=true, which re-dates them (the preview shows old and new dates). Up to 50 per call. Each case is checked first and skipped (with the reason) if it has no linked appointment, the appointment isn't Complete, or the appointment is on/after 'before'. Every write is read back. Never deletes. With preview=true (the default) nothing is written: show the user the preview, then call again with preview=false after a clear yes. Find candidates with od_run_report 'lab_cases_unreceived_completed' (never received) or 'lab_cases_received_on_appointment_date' (received date equals the appointment date).",
       inputSchema: obj(
         {
           lab_case_nums: { type: "array", items: { type: "integer" }, minItems: 1, maxItems: 50, description: "LabCaseNums to mark received." },
           before: str("Skip cases whose appointment is on or after this date (yyyy-MM-dd)."),
+          received_date: str("Use this received date (yyyy-MM-dd or yyyy-MM-dd HH:mm) instead of each appointment's date."),
+          overwrite_received: bool("Re-date cases that already have a received date. Default false."),
           preview: bool("Default true: only check and report what would change."),
         },
         ["lab_case_nums"]
@@ -292,6 +328,8 @@ function buildLabTools(od, { allowWrites = false } = {}) {
           if (!validDate(a.before)) throw new ODError("before must be a date yyyy-MM-dd.", { code: "bad_input" });
           before = a.before;
         }
+        const fixedDate = dateTime("received_date", a.received_date);
+        const overwrite = a.overwrite_received === true;
         const nums = [...new Set(a.lab_case_nums.map((n) => recordId("lab_case_nums", n)))];
         const results = [];
         let stopped = null;
@@ -304,7 +342,8 @@ function buildLabTools(od, { allowWrites = false } = {}) {
           try {
             const c = await getCase(num);
             r.PatNum = c.PatNum;
-            if (!isBlankDate(c.DateTimeRecd)) throw new Error(`already received ${c.DateTimeRecd}`);
+            const already = !isBlankDate(c.DateTimeRecd);
+            if (already && !overwrite) throw new Error(`already received ${c.DateTimeRecd}`);
             const aptNum = Number(c.AptNum);
             if (!aptNum) throw new Error("no linked appointment");
             const appt = await getAppt(aptNum);
@@ -313,14 +352,20 @@ function buildLabTools(od, { allowWrites = false } = {}) {
             const when = String(appt.AptDateTime || "");
             if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(when) || isBlankDate(when)) throw new Error("appointment has no date");
             if (before && when.slice(0, 10) >= before) throw new Error(`appointment ${when.slice(0, 10)} is on/after ${before}`);
+            const target = fixedDate || when;
+            if (already && String(c.DateTimeRecd).trim() === target) throw new Error(`already received on ${target}`);
             r.AptNum = aptNum;
-            r.ReceivedDate = when;
+            r.AppointmentDate = when;
+            if (already) r.OldReceivedDate = c.DateTimeRecd;
+            r.ReceivedDate = target;
             r.NeverSent = isBlankDate(c.DateTimeSent);
+            const verb = already ? "re-date received" : "mark received";
             if (preview) {
-              r.result = "would mark received";
+              r.result = `would ${verb}`;
             } else {
-              await od.request("PUT", `/labcases/${num}`, { body: { DateTimeRecd: when } });
-              r.result = "marked received";
+              await od.request("PUT", `/labcases/${num}`, { body: { DateTimeRecd: target } });
+              await verifyCase(num, { DateTimeRecd: target });
+              r.result = already ? "re-dated received" : "marked received";
             }
           } catch (e) {
             // Problems with Open Dental itself (keys, permissions, network, rate limits) stop the batch;

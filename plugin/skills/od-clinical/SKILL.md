@@ -44,8 +44,12 @@ If procedures aren't marked complete yet, say so; the group note covers complete
 3. Get priority names with `od_list_treatment_priorities` if the user mentions priority or phases.
 4. Show a table: tooth, surfaces, code, description, priority, plan. Get a yes.
 5. Create each with `od_plan_procedure`. Open Dental fills in the fee from the patient's fee schedule and insurance; report the fees it returns, not your own estimates.
-6. **Grouping into plans:** `od_create_treatment_plan` for a named group (e.g. "Phase 1 - Urgent", "Option A - Implant", "Option B - Bridge"), then `od_add_to_treatment_plan` or pass `treat_plan_num` when planning. Plans start Inactive; the office activates and presents them in Open Dental.
-7. Changes: `od_update_planned_procedure` (planned only), `od_remove_planned_procedure` (planned only, confirm first), `od_update_treatment_plan` for names and notes.
+6. **Grouping into plans:** `od_create_treatment_plan` for a named group (e.g. "Phase 1 - Urgent", "Option A - Implant", "Option B - Bridge"), then `od_add_to_treatment_plan` or pass `treat_plan_num` when planning. Plans start Inactive; the office activates and presents them in Open Dental. Procedures already on the plan aren't added twice; giving a priority updates theirs.
+7. **Ordering a plan:** `od_set_treatment_plan_priorities` with groups, e.g. crown + buildup #2 = "1", RCT #4 = "2", bridge 18-20 = "3". Show the whole ordering as a table and get one yes. Everything is checked before anything changes.
+8. **Priority is kept in sync.** A procedure has its own priority (shown in the Chart) and each plan item has one (orders the plan). The tools set both to the same value by default; pass `sync_plan_items: false` / `sync_procedures: false` only if the user wants them different. "none" clears a priority.
+9. Changes: `od_update_planned_procedure` (planned only), `od_remove_planned_procedure` (planned only, confirm first), `od_update_treatment_plan` for names and notes.
+
+Every chart change is read back from Open Dental after saving. If a tool says Open Dental "did not apply" a change, tell the user it was NOT made and show the detail; never report it as done.
 
 Do not schedule or estimate insurance here; those happen in Open Dental (or with od-schedule for appointments).
 

@@ -320,6 +320,23 @@ WHERE lc.DateTimeRecd < '1880-01-01' AND a.AptStatus = 2${and(p.before && `a.Apt
 ORDER BY a.AptDateTime, lc.LabCaseNum LIMIT ${Math.min(Math.max(Number(p.limit), 1), 5000)}`,
   },
 
+  lab_cases_received_on_appointment_date: {
+    category: "lab",
+    description:
+      "Lab cases whose received date equals their linked Complete appointment's date and time (e.g. cases marked received by the cleanup tool). Optional cutoff keeps appointments before that date. Use count_only for the total.",
+    params: { before: { type: "date" }, count_only: { type: enumType("true", "false"), default: "false" }, limit: { type: "int", default: 1000 } },
+    sql: (p) =>
+      p.count_only === "true"
+        ? `SELECT COUNT(*) AS Cases, MIN(DATE(a.AptDateTime)) AS EarliestAppt, MAX(DATE(a.AptDateTime)) AS LatestAppt
+FROM labcase lc JOIN appointment a ON a.AptNum = lc.AptNum
+WHERE lc.DateTimeRecd = a.AptDateTime AND a.AptStatus = 2${and(p.before && `a.AptDateTime < ${p.before}`)}`
+        : `SELECT lc.LabCaseNum, lc.PatNum, lc.AptNum, a.AptDateTime AS ApptDateTime, lc.DateTimeRecd, l.Description AS Lab
+FROM labcase lc JOIN appointment a ON a.AptNum = lc.AptNum
+LEFT JOIN laboratory l ON l.LaboratoryNum = lc.LaboratoryNum
+WHERE lc.DateTimeRecd = a.AptDateTime AND a.AptStatus = 2${and(p.before && `a.AptDateTime < ${p.before}`)}
+ORDER BY a.AptDateTime, lc.LabCaseNum LIMIT ${Math.min(Math.max(Number(p.limit), 1), 5000)}`,
+  },
+
   operatories: {
     category: "schedule",
     description: "Operatories (chairs) with assigned providers.",

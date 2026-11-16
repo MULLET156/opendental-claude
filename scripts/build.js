@@ -175,7 +175,7 @@ function buildGatewayWindows() {
     { name: "app/LICENSE", data: read("LICENSE") },
     ...walk(path.join(ROOT, "core")).map((e) => ({ name: `app/core/${e.name}`, data: e.data })),
     ...walk(path.join(ROOT, "gateway"))
-      .filter((e) => !/(^|\/)\.env$|^gateway\.config\.json$|^logs\//.test(e.name))
+      .filter((e) => !/(^|\/)\.env$|^gateway\.config\.json$|^logs\/|^demo\//.test(e.name)) // the demo (fake data) is not part of the office install
       .map((e) => ({ name: `app/gateway/${e.name}`, data: /\.(ps1|cmd|txt)$/.test(e.name) ? crlf(e.data) : e.data })),
   ];
   return { data: zip(entries), names: entries.map((e) => e.name) };

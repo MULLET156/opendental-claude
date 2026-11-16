@@ -109,7 +109,7 @@ test("Windows download has Setup.cmd at the top and the gateway under app/", () 
   for (const n of ["Setup.cmd", "README.txt", "settings.txt", "app/package.json", "app/LICENSE", "app/core/odclient.js", "app/core/reports.js", "app/gateway/server.js", "app/gateway/lab-sync.js", "app/gateway/windows/setup.ps1", "app/gateway/windows/setup-helper.js", "app/gateway/windows/Setup.cmd"]) {
     assert.ok(names.includes(n), n);
   }
-  assert.ok(!names.some((n) => /(^|\/)\.env$|gateway\.config\.json$|node_modules/.test(n)));
+  assert.ok(!names.some((n) => /(^|\/)\.env$|gateway\.config\.json$|node_modules|^app\/gateway\/demo\//.test(n)));
 });
 
 test("settings.txt template has no values for keys or the secret", () => {

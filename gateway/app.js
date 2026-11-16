@@ -7,7 +7,7 @@
  * leave this server), removes SSNs, and writes an audit line for every request.
  *
  * Routes
- *   GET  /health                     liveness (no auth, no Open Dental call)
+ *   GET  /health                     liveness (no auth, no Open Dental call); "fake": true only on the demo gateway
  *   GET  /v1/me                      the calling app's name and permissions
  *   GET  /v1/reports                 built-in reports this app may run
  *   GET  /v1/reports/:name?from=..   run a report (params in the query string)
@@ -21,7 +21,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { ODError, makeRedactor } = require("../core/odclient");
-const { buildReport, describeReports } = require("../core/reports");
+const { runReport, describeReports } = require("../core/reports");
 const { findApp, allowsPath, allowsReport } = require("./config");
 
 const ERROR_STATUS = {
@@ -29,6 +29,7 @@ const ERROR_STATUS = {
   auth: 401,
   forbidden: 403,
   not_found: 404,
+  not_implemented: 501,
   too_large: 413,
   rate_limited: 429,
   unreachable: 502,
@@ -45,7 +46,7 @@ class HttpError extends Error {
   }
 }
 
-function createGateway({ config, od, version = "dev", now = () => Date.now() }) {
+function createGateway({ config, od, version = "dev", fake = false, now = () => Date.now() }) {
   const buckets = new Map(); // app name -> { tokens, updated }
   const redactors = new Map(config.apps.map((a) => [a.name, makeRedactor(a.redact)]));
 
@@ -205,8 +206,12 @@ function createGateway({ config, od, version = "dev", now = () => Date.now() }) 
       } else {
         params = body && body.params !== undefined ? body.params : body || {};
       }
-      const sql = buildReport(name, params);
-      const { rows, truncated } = await od.shortQuery(sql, { limit: pageLimit(app, url.searchParams) });
+      // Office-wide defaults from the config (e.g. the hygiene code list) fill in what the app didn't send.
+      const defaults = (config.reportDefaults && config.reportDefaults[name]) || {};
+      if (params && typeof params === "object" && !Array.isArray(params)) {
+        for (const [k, v] of Object.entries(defaults)) if (params[k] === undefined || params[k] === null || params[k] === "") params[k] = v;
+      }
+      const { rows, truncated } = await runReport(od, name, params, { limit: pageLimit(app, url.searchParams) });
       ctx.rows = rows.length;
       return { status: 200, body: { report: name, count: rows.length, truncated, rows: redact(rows) } };
     }
@@ -270,7 +275,9 @@ function createGateway({ config, od, version = "dev", now = () => Date.now() }) 
       return res.end();
     }
     if (url.pathname === "/health" && req.method === "GET") {
-      return send(res, 200, { ok: true, service: "opendental-gateway", version }, cors);
+      // "fake": true only on the demo gateway (fake data). TDC Office modules in the design
+      // stage refuse to start unless they see it; the real gateway always says false.
+      return send(res, 200, { ok: true, service: "opendental-gateway", version, fake: !!fake }, cors);
     }
 
     const ctx = { target: url.pathname.replace(/\/\d+(?=\/|$)/g, "/{id}"), rows: undefined };

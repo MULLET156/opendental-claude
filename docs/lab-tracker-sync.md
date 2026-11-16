@@ -36,8 +36,9 @@ Per case, only:
 | `doctor` | provider abbreviation |
 | `created`, `sent`, `due`, `received`, `checked`, `seat` | dates only (`yyyy-MM-dd`) or `null` |
 | `seat_done` | whether the seat appointment is complete |
+| `patnum` | Open Dental's PatNum, **only with `"sendPatNum": true`** (off by default) |
 
-Not sent: date of birth, chart number, PatNum, LabCaseNum, AptNum, phone, address, lab instructions, fees.
+Not sent: date of birth, chart number, LabCaseNum, AptNum, phone, address, lab instructions, fees; PatNum unless `sendPatNum` is on.
 
 > **HIPAA:** initials together with dates are still protected health information. A web host that won't sign a BAA (most shared hosting, including Hostinger) is a risk you accept by turning this on. `"patientFormat": "initials"` sends less. See [hipaa-and-security.md](hipaa-and-security.md).
 
@@ -89,6 +90,7 @@ You need the gateway installed in the office (see [gateway.md](gateway.md)); a s
    | `intervalMinutes` | 1–60, default 5. |
    | `keepDays` | Keep sending checked cases for this many days so late edits still flow (default 30). |
    | `patientFormat` | `initial-last` (J. Smith, default) or `initials` (J.S.). |
+   | `sendPatNum` | `true` also sends Open Dental's PatNum with each case so staff can find the patient (default `false`). It's one more identifier on the web host, so it adds to the HIPAA note above. Windows setup: `SEND_PATIENT_NUMBER=yes`. |
    | `readyNote` | Text added to the seat appointment's note when a case is ready. The lab name is added in brackets. |
    | `enabled` | `false` turns the sync off without removing the settings. |
 

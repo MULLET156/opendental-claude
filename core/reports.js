@@ -458,9 +458,9 @@ ORDER BY a.AptDateTime, lc.LabCaseNum LIMIT ${Math.min(Math.max(Number(p.limit),
   lab_cases_for_sync: {
     category: "lab",
     description:
-      "Lab cases for the lab-tracker sync: created on or after 'since', still open or checked within the last keep_days days. Returns only the patient's first initial and last name, never DOB, chart number or PatNum.",
+      "Lab cases for the lab-tracker sync: created on or after 'since', still open or checked within the last keep_days days. Returns the patient's first initial, last name and PatNum (the PatNum goes to the tracker only when sendPatNum is on), never DOB or chart number.",
     params: { since: { type: "date", required: true }, keep_days: { type: "int", default: 30 }, limit: { type: "int", default: 2000 } },
-    sql: (p) => `SELECT lc.LabCaseNum, LEFT(TRIM(p.FName), 1) AS FirstInitial, TRIM(p.LName) AS LastName,
+    sql: (p) => `SELECT lc.LabCaseNum, lc.PatNum, LEFT(TRIM(p.FName), 1) AS FirstInitial, TRIM(p.LName) AS LastName,
   lc.LaboratoryNum, l.Description AS Lab, pr.Abbr AS Provider,
   lc.DateTimeCreated, lc.DateTimeSent, lc.DateTimeDue, lc.DateTimeRecd, lc.DateTimeChecked,
   lc.AptNum, a.AptDateTime AS SeatAppt, a.AptStatus AS SeatStatus

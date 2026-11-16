@@ -10,6 +10,7 @@ For the TDC Office web apps (design stage). See `docs/tdc-office.md`.
 - **Module presets:** `node gateway/cli.js new-key daysheet` (also `finder`, `voice`, `numbers`) prints a config entry with that module's narrowest permissions. Only Voice Charting may write.
 - **`scripts/sync-core.js`** for module repos: copies `core/` at a released version (or a test build) into `vendor/opendental-core/` with `VERSION` and `CHECKSUMS`.
 - The Windows gateway download leaves out the demo.
+- **Lab tracker sync can send the patient number** (was 0.8.3): with `"sendPatNum": true` in `labSync` (Windows setup: `SEND_PATIENT_NUMBER=yes` in `settings.txt`), each case also carries Open Dental's PatNum so staff can find the patient. Off by default; date of birth, chart number and other Open Dental numbers are still never sent.
 
 ## 0.8.2 — 2026-11-14
 

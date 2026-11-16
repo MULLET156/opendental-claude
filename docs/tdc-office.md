@@ -3,12 +3,12 @@
 This is how the TDC Office modules (Daysheet, Treatment Finder, Voice Charting, Practice Numbers) reach Open Dental. The overall plan is in [TDC-Office-Plan](https://github.com/MULLET156/TDC-Office-Plan). This page covers this repo's part: the **demo gateway** with fake data, **gateway mode** for the shared `core/` code, **reports**, and **sync-core**.
 
 ```
- design stage (now, Hostinger)                     live stage (later, office server)
- module ──► demo gateway ──► fake Open Dental        module ──► gateway ──► real Open Dental
-            /health "fake": true                                /health "fake": false
+ building (laptop)        module ──► demo gateway ──► fake office              /health "stage":"design", "fake":true
+ design stage (Hostinger) module ──► tunnel ──► office gateway ──► OD demo database   "stage":"design", "fake":false
+ live stage (office)      module ──► office gateway ──► real Open Dental        "stage":"live",   "fake":false
 ```
 
-The same module code runs in both stages. Only its settings change (`TDC_STAGE`, `GATEWAY_URL`, `GATEWAY_KEY`). In the design stage, a module checks that the gateway says `"fake": true` and refuses to start otherwise.
+The same module code runs everywhere. Only its settings change (`TDC_STAGE`, `GATEWAY_URL`, `GATEWAY_KEY`). A module checks that the gateway's `/health` `"stage"` matches `TDC_STAGE` (`checkStage()`, at startup and every 5 minutes) and stops serving patient pages if it doesn't. The office gateway's stage is set in its config (`"stage": "design"`, or `STAGE=design` in the Windows setup's `settings.txt`); unset means live.
 
 ## The demo gateway (fake data)
 
@@ -34,7 +34,7 @@ You need Node.js 20 or newer (`node -v` in a terminal to check). Get it from [no
      ...
    ```
 
-4. Open **http://127.0.0.1:8787/health** in your browser. You should see `"fake":true`.
+4. Open **http://127.0.0.1:8787/health** in your browser. You should see `"stage":"design"` and `"fake":true`.
 5. Leave the window open while you try a module. Close it (or press Ctrl+C) to stop.
 
 To fix "today" to a date: `npm run dev -- --today 2026-11-16`. For another port: `--port 8788`.
@@ -99,7 +99,7 @@ const { checkStage } = require("./vendor/opendental-core/gateway-client");
 const { runReport } = require("./vendor/opendental-core/reports");
 
 const od = createClient({ gatewayUrl: process.env.GATEWAY_URL, gatewayKey: process.env.GATEWAY_KEY });
-await checkStage(od, process.env.TDC_STAGE);   // at startup: refuses design unless the gateway is fake
+await checkStage(od, process.env.TDC_STAGE);   // at startup and every 5 minutes: the gateway's stage must match
 
 const { rows } = await runReport(od, "daysheet", { date: "2026-11-16" });   // or od.runReport(...)
 const patient = await od.request("GET", "/patients/1001");                   // Open Dental API, through the gateway
@@ -140,9 +140,9 @@ Run with `POST /v1/reports/<name>` and a JSON body `{"params": {...}}` (or `GET`
 | `unsigned_notes` | `days` (default 90) or `from`/`to`, `provider`, `count_only`, `limit` | ProcNum, PatNum, LName, FName, ProcDate, ProcCode, Descript, ProvNum, Provider, NoteEntered (or one row `{UnsignedNotes}` with count_only) |
 
 Notes:
-- **Hygiene** is left out of `unscheduled_treatment` by default. The default list is exams, x-rays, prophy, fluoride and perio maintenance (D0120, D0140, D0150, D0180, D0210, D0220, D0230, D0270–D0277, D0330, D1110, D1120, D1206, D1208, D4346, D4910). Ryan still has to confirm it. To change it office-wide, set `reportDefaults` in the gateway config:
+- **Hygiene** is left out of `unscheduled_treatment`, and out of `no_future_appointment`'s planned total. Ryan's list (2026-11-16): D0120, D0140, D0150, D0210, D0272, D0274, D1110, D1120, D1206, D1208, D4341, D4342, D4346, D4355, D4910. To change it for every report at once, set `hygieneCodes` in the gateway config:
   ```json
-  "reportDefaults": { "unscheduled_treatment": { "hygiene_codes": ["D0120", "D1110", "D1120", "D4910"] } }
+  "hygieneCodes": ["D0120", "D0140", "D1110", "D1120", "D4910"]
   ```
 - **X-ray limits** come from the primary plan's benefit table (frequency limitations by code or code group). `NextCovered` is the first date insurance should cover that x-ray again; `CoveredNow` is true when that's today or earlier, and null when there's no limit on file. It is not a live check with the insurer.
 - **Insurance remaining** is an estimate: the primary plan's annual maximum minus what's recorded as paid or pending this benefit year.

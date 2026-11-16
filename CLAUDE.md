@@ -16,7 +16,7 @@
 
 - Changes that **write to Open Dental** (tools, gateway write paths, the lab sync write-back) are tested live on the test patient **PatNum 8133** (Ryan A. Millet) before merging, or Ryan does that test first.
 - A change to TDC-Office-Plan's CONTRACT.md needs Ryan's OK first (open a `Contract change: ...` issue).
-- `main` deploys the demo gateway on Hostinger: after merging, check its `/health` (still `"fake": true`) and revert the PR at once if something broke.
+- `main` deploys the demo gateway on Hostinger: after merging, check its `/health` (still `"stage": "design"`, `"fake": true`) and revert the PR at once if something broke.
 
 ## Check and release
 

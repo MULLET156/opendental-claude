@@ -164,7 +164,7 @@ function createGatewayClient(opts = {}) {
     return { rows: data.rows || [], truncated: !!data.truncated };
   }
 
-  /** GET /health (no key). In the design stage it must report "fake": true. */
+  /** GET /health (no key): { version, stage: "design"|"live", fake }. */
   async function health() {
     return (await call("GET", "/health", { auth: false })).data;
   }
@@ -173,19 +173,20 @@ function createGatewayClient(opts = {}) {
 }
 
 /**
- * Module startup check (CONTRACT.md: Two stages). In TDC_STAGE=design the
- * gateway must be the demo gateway with fake data; otherwise refuse to start.
- * Returns the health answer.
+ * Module stage check (CONTRACT.md §1): run at startup and every 5 minutes. The
+ * gateway's /health "stage" must match TDC_STAGE; in the design stage a module
+ * stops serving patient pages otherwise. Returns the health answer.
  */
 async function checkStage(client, stage) {
   const s = String(stage || "").trim().toLowerCase();
   if (s !== "design" && s !== "live") throw new ODError('TDC_STAGE must be "design" or "live".', { code: "config" });
   const h = await client.health();
-  if (s === "design" && h.fake !== true) {
-    throw new ODError("TDC_STAGE is design, but the gateway at GATEWAY_URL is not the demo gateway with fake data. Refusing to start.", { code: "config" });
+  const gw = h && typeof h.stage === "string" ? h.stage : h && h.fake === true ? "design" : "live";
+  if (s === "design" && gw !== "design") {
+    throw new ODError(`TDC_STAGE is design, but the gateway at GATEWAY_URL says stage "${gw}". Refusing to serve patient pages.`, { code: "config" });
   }
-  if (s === "live" && h.fake === true) {
-    throw new ODError("TDC_STAGE is live, but the gateway at GATEWAY_URL is the demo gateway with fake data.", { code: "config" });
+  if (s === "live" && (gw !== "live" || h.fake === true)) {
+    throw new ODError(`TDC_STAGE is live, but the gateway at GATEWAY_URL says stage "${gw}"${h.fake === true ? " (demo with fake data)" : ""}.`, { code: "config" });
   }
   return h;
 }

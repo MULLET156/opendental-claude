@@ -7,7 +7,7 @@
  * leave this server), removes SSNs, and writes an audit line for every request.
  *
  * Routes
- *   GET  /health                     liveness (no auth, no Open Dental call); "fake": true only on the demo gateway
+ *   GET  /health                     liveness (no auth, no Open Dental call): version, "stage" (design|live), "fake"
  *   GET  /v1/me                      the calling app's name and permissions
  *   GET  /v1/reports                 built-in reports this app may run
  *   GET  /v1/reports/:name?from=..   run a report (params in the query string)
@@ -21,7 +21,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { ODError, makeRedactor } = require("../core/odclient");
-const { runReport, describeReports } = require("../core/reports");
+const { runReport, describeReports, REPORTS } = require("../core/reports");
 const { findApp, allowsPath, allowsReport } = require("./config");
 
 const ERROR_STATUS = {
@@ -46,7 +46,8 @@ class HttpError extends Error {
   }
 }
 
-function createGateway({ config, od, version = "dev", fake = false, now = () => Date.now() }) {
+function createGateway({ config, od, version = "dev", fake = false, stage, now = () => Date.now() }) {
+  const gatewayStage = stage || config.stage || "live";
   const buckets = new Map(); // app name -> { tokens, updated }
   const redactors = new Map(config.apps.map((a) => [a.name, makeRedactor(a.redact)]));
 
@@ -207,7 +208,9 @@ function createGateway({ config, od, version = "dev", fake = false, now = () => 
         params = body && body.params !== undefined ? body.params : body || {};
       }
       // Office-wide defaults from the config (e.g. the hygiene code list) fill in what the app didn't send.
-      const defaults = (config.reportDefaults && config.reportDefaults[name]) || {};
+      const defaults = { ...((config.reportDefaults && config.reportDefaults[name]) || {}) };
+      // One office-wide hygiene list for every report that takes one.
+      if (config.hygieneCodes && REPORTS[name] && REPORTS[name].params.hygiene_codes && defaults.hygiene_codes === undefined) defaults.hygiene_codes = config.hygieneCodes;
       if (params && typeof params === "object" && !Array.isArray(params)) {
         for (const [k, v] of Object.entries(defaults)) if (params[k] === undefined || params[k] === null || params[k] === "") params[k] = v;
       }
@@ -275,9 +278,10 @@ function createGateway({ config, od, version = "dev", fake = false, now = () => 
       return res.end();
     }
     if (url.pathname === "/health" && req.method === "GET") {
-      // "fake": true only on the demo gateway (fake data). TDC Office modules in the design
-      // stage refuse to start unless they see it; the real gateway always says false.
-      return send(res, 200, { ok: true, service: "opendental-gateway", version, fake: !!fake }, cors);
+      // "stage" (CONTRACT.md §1): TDC Office modules on Hostinger only serve patient pages
+      // while it says "design" (Open Dental demo database). "fake": true only on the demo
+      // gateway with made-up data. Nothing here is sensitive; no Open Dental call.
+      return send(res, 200, { ok: true, service: "opendental-gateway", version, stage: gatewayStage, fake: !!fake }, cors);
     }
 
     const ctx = { target: url.pathname.replace(/\/\d+(?=\/|$)/g, "/{id}"), rows: undefined };

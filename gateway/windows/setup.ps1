@@ -226,7 +226,7 @@ function Write-EnvFile([string]$file, [hashtable]$map) {
 
 # ---------------------------------------------------------------- settings.txt
 
-$SettingNames = @("DEVELOPER_KEY", "CUSTOMER_KEY", "OPEN_DENTAL_ADDRESS", "API_PLAN", "LAB_SYNC", "LAB_TRACKER_ADDRESS", "IN_HOUSE_LABS", "SYNC_START_DATE", "PATIENT_FORMAT", "SEND_PATIENT_NUMBER", "SHARED_SECRET", "SEND_TEST")
+$SettingNames = @("DEVELOPER_KEY", "CUSTOMER_KEY", "OPEN_DENTAL_ADDRESS", "API_PLAN", "LAB_SYNC", "LAB_TRACKER_ADDRESS", "IN_HOUSE_LABS", "SYNC_START_DATE", "PATIENT_FORMAT", "SEND_PATIENT_NUMBER", "SHARED_SECRET", "SEND_TEST", "STAGE")
 
 # Reads NAME=value lines (comments start with #). Returns only the values filled in.
 function Read-Settings([string]$file) {
@@ -612,6 +612,11 @@ try {
   }
 
   if ($envMap['OD_API_PLAN']) { $writeEnv['SETUP_OD_PLAN'] = $envMap['OD_API_PLAN'] }
+  # TDC Office stage: design while the gateway serves Open Dental's demo database to the prototype.
+  if ($st['STAGE']) {
+    if ($st['STAGE'] -match '^\s*(design|live)\s*$') { $writeEnv['SETUP_STAGE'] = $Matches[1].ToLower(); Good "Stage: $($writeEnv['SETUP_STAGE'])" }
+    else { Warn "STAGE should be design or live; keeping the saved stage." }
+  }
   foreach ($k in $writeEnv.Keys) { Set-Item -Path "Env:$k" -Value $writeEnv[$k] }
   try { $w = Helper @("write", $Config) } finally { foreach ($k in $writeEnv.Keys) { Remove-Item -Path "Env:$k" -ErrorAction SilentlyContinue } }
   if (-not $w.ok) { throw "Settings problem: $($w.error)" }

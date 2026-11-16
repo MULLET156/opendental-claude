@@ -71,6 +71,8 @@ function validateConfig(raw, { requireApps = true } = {}) {
     corsOrigins: Array.isArray(raw.corsOrigins) ? raw.corsOrigins : [],
     openDental: { plan: "standard", minIntervalMs: null, ...(raw.openDental || {}) },
     reportDefaults: {},
+    stage: "live",
+    hygieneCodes: null,
     apps: [],
   };
   if (!Number.isInteger(cfg.listen.port) || cfg.listen.port < 1 || cfg.listen.port > 65535) {
@@ -89,6 +91,23 @@ function validateConfig(raw, { requireApps = true } = {}) {
   }
   for (const o of cfg.corsOrigins) {
     if (typeof o !== "string" || !/^https?:\/\/[^/]+$/.test(o)) throw new ConfigError(`corsOrigins entry "${o}" must look like https://app.example.com`);
+  }
+
+  // Stage (TDC Office): "design" while it serves Open Dental's demo database to the
+  // Hostinger prototype, "live" otherwise. Unset means live, so a forgotten setting fails safe.
+  if (raw.stage !== undefined) {
+    if (raw.stage !== "design" && raw.stage !== "live") throw new ConfigError('stage must be "design" or "live".');
+    cfg.stage = raw.stage;
+  }
+
+  // The office's hygiene codes, used by every report that leaves hygiene out.
+  if (raw.hygieneCodes !== undefined) {
+    try {
+      parseReportParams("unscheduled_treatment", { hygiene_codes: raw.hygieneCodes }, { partial: true });
+    } catch (e) {
+      throw new ConfigError(`hygieneCodes: ${e.message.replace(/^Report "unscheduled_treatment" parameter "hygiene_codes" /, "")}`);
+    }
+    cfg.hygieneCodes = raw.hygieneCodes;
   }
 
   // Office-wide report defaults, e.g. { "unscheduled_treatment": { "hygiene_codes": ["D1110", ...] } }.

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.0 — 2026-11-16
+
+- **Gateway stage** (CONTRACT.md §1, issue #6): `"stage": "design" | "live"` in the gateway config (Windows setup: `STAGE=` in `settings.txt`); unset means live, so a forgotten setting fails safe. `/health` reports `"stage"` (and still `"fake"`). The demo gateway says `"stage": "design"`. `checkStage()` now follows the stage: a design-stage module accepts the office gateway serving Open Dental's demo database, not only the fake demo.
+- **Ryan's hygiene codes** are the default: D0120, D0140, D0150, D0210, D0272, D0274, D1110, D1120, D1206, D1208, D4341, D4342, D4346, D4355, D4910. One office-wide setting, `hygieneCodes` in the gateway config, applies to `unscheduled_treatment` and `no_future_appointment` (whose planned total now leaves hygiene out).
+- **Demo gateway starts on Hostinger** (issue #5): the fake Open Dental now answers in-process instead of as a second web server, which LiteSpeed's `lsnode` took over.
+
 ## 0.9.0 — 2026-11-15
 
 For the TDC Office web apps (design stage). See `docs/tdc-office.md`.

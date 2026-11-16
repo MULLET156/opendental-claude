@@ -60,6 +60,7 @@ function buildConfig(raw, env) {
   if (!Array.isArray(cfg.apps)) cfg.apps = [];
   // Drop the example apps' placeholder keys if someone copied the example file.
   cfg.apps = cfg.apps.filter((a) => !/^sha256:(\d)\1{63}$/.test(String(a && a.keyHash)));
+  if (env.SETUP_STAGE === "design" || env.SETUP_STAGE === "live") cfg.stage = env.SETUP_STAGE;
   if (env.SETUP_OD_PLAN) cfg.openDental = { ...(cfg.openDental || {}), plan: env.SETUP_OD_PLAN };
   if (!cfg.openDental) cfg.openDental = { plan: "standard" };
 

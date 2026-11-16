@@ -54,6 +54,7 @@ function main() {
   }
 
   const handler = createGateway({ config, od, version });
+  console.log(`Stage: ${config.stage}${config.stage === "design" ? " (TDC Office prototype; Open Dental should be the demo database)" : ""}`);
   const server = config.tls
     ? https.createServer({ cert: fs.readFileSync(config.tls.certFile), key: fs.readFileSync(config.tls.keyFile) }, handler)
     : http.createServer(handler);

@@ -1,6 +1,6 @@
 {
   "name": "opendental",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Skills for running a dental office from Claude with Open Dental: schedule and open slots, patient lookup, chart notes and treatment planning, lab cases, A/R and claims, production and collections. Requires the Open Dental connector (opendental.mcpb).",
   "author": { "name": "Ryan Millet" },
   "homepage": "https://github.com/MULLET156/opendental-claude",

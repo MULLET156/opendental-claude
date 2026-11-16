@@ -104,7 +104,7 @@ const FAKES = {
           PriProv: pt.PriProv,
           Provider: pr ? pr.Abbr : null,
           LastVisit: visits.length ? visits[visits.length - 1] : null,
-          PlannedTotal: sum(o.procedurelog.filter((pl) => pl.PatNum === pt.PatNum && pl.ProcStatus === 1).map(fee)),
+          PlannedTotal: sum(o.procedurelog.filter((pl) => pl.PatNum === pt.PatNum && pl.ProcStatus === 1 && !(p.hygiene_codes || []).includes(ix.code.get(pl.CodeNum).ProcCode)).map(fee)),
           AsOf: today,
         };
       })

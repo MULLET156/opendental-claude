@@ -103,14 +103,14 @@ function dateOnly(v) {
 const APT_STATUS = { 1: "Scheduled", 2: "Complete", 3: "UnschedList", 4: "ASAP", 5: "Broken", 6: "Planned", 7: "PtNote", 8: "PtNoteCompleted" };
 
 /**
- * Codes treated as hygiene for "planned but not scheduled" lists (PLAN.md: hygiene is
- * left out). Ryan still has to confirm the exact list; reports take hygiene_codes, and
- * the gateway config can set a default (reportDefaults).
+ * Hygiene codes (Ryan, 2026-11-16): left out of "planned but not scheduled" lists and
+ * of no_future_appointment's planned total. Reports take hygiene_codes; the gateway
+ * config's hygieneCodes sets one office-wide list for every report that uses it.
  */
 const DEFAULT_HYGIENE_CODES = [
-  "D0120", "D0140", "D0150", "D0180", // exams
-  "D0210", "D0220", "D0230", "D0270", "D0272", "D0273", "D0274", "D0277", "D0330", // x-rays
-  "D1110", "D1120", "D1206", "D1208", "D4346", "D4910", // prophy, fluoride, perio maintenance
+  "D0120", "D0140", "D0150", "D0210", "D0272", "D0274", // exams and x-rays
+  "D1110", "D1120", "D1206", "D1208", // prophy and fluoride
+  "D4341", "D4342", "D4346", "D4355", "D4910", // scaling and root planing, debridement, perio maintenance
 ];
 
 /** X-ray categories for xray_history. */
@@ -515,8 +515,9 @@ ORDER BY p.LName, p.FName, pl.PatNum, pl.DateTP, pl.ProcNum LIMIT ${cap(p.limit)
   no_future_appointment: {
     category: "patients",
     description:
-      "Active patients with no scheduled appointment from today on, with their last completed visit and planned (unscheduled or not) treatment total. Patients never seen are left out unless include_never_seen=true.",
+      "Active patients with no scheduled appointment from today on, with their last completed visit and planned treatment total (hygiene codes left out of the total). Patients never seen are left out unless include_never_seen=true.",
     params: {
+      hygiene_codes: { type: "codes", default: DEFAULT_HYGIENE_CODES },
       last_visit_after: { type: "date" },
       last_visit_before: { type: "date" },
       provider: { type: "id" },
@@ -526,7 +527,8 @@ ORDER BY p.LName, p.FName, pl.PatNum, pl.DateTP, pl.ProcNum LIMIT ${cap(p.limit)
     columns: ["PatNum", "LName", "FName", "PriProv", "Provider", "LastVisit", "PlannedTotal", "AsOf"],
     sql: (p) => `SELECT p.PatNum, p.LName, p.FName, p.PriProv, pr.Abbr AS Provider,
   (SELECT DATE(MAX(a.AptDateTime)) FROM appointment a WHERE a.PatNum = p.PatNum AND a.AptStatus = 2) AS LastVisit,
-  (SELECT ROUND(IFNULL(SUM(${PROD}), 0), 2) FROM procedurelog pl WHERE pl.PatNum = p.PatNum AND pl.ProcStatus = 1) AS PlannedTotal,
+  (SELECT ROUND(IFNULL(SUM(${PROD}), 0), 2) FROM procedurelog pl JOIN procedurecode pc ON pc.CodeNum = pl.CodeNum
+    WHERE pl.PatNum = p.PatNum AND pl.ProcStatus = 1 AND pc.ProcCode NOT IN (${p.hygiene_codes})) AS PlannedTotal,
   CURDATE() AS AsOf
 FROM patient p
 LEFT JOIN provider pr ON pr.ProvNum = p.PriProv

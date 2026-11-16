@@ -68,24 +68,67 @@ test("gateway mode: same client interface, through the gateway, key never in err
   await assert.rejects(createGatewayClient({ url: "http://127.0.0.1:1", key: "x".repeat(20) }).request("GET", "/providers"), /Could not reach the Open Dental gateway/);
 });
 
-test("stage check: design needs the fake gateway; the real gateway says fake:false", async () => {
-  assert.equal((await checkStage(client("daysheet"), "design")).fake, true);
-  await assert.rejects(checkStage(client("daysheet"), "live"), /demo gateway/);
+test("stage check: modules follow the gateway's \"stage\"; unset means live", async () => {
+  const h = await client("daysheet").health();
+  assert.deepEqual([h.stage, h.fake], ["design", true]);
+  assert.equal((await checkStage(client("daysheet"), "design")).stage, "design");
+  await assert.rejects(checkStage(client("daysheet"), "live"), /says stage "design"/);
   await assert.rejects(checkStage(client("daysheet"), "prod"), /TDC_STAGE/);
+  assert.throws(() => validateConfig({ apps: [], stage: "demo" }, { requireApps: false }), /stage must be/);
 
   const od = await startFakeOD();
-  const real = createGateway({ config: validateConfig({ apps: [{ name: "a", keyHash: hashKey("k".repeat(30)), allow: [] }], auditLogDir: null }), od: createClient({ baseUrl: od.url, developerKey: "dev1", customerKey: "cust1" }) });
   const http = require("node:http");
-  const srv = http.createServer(real);
-  await new Promise((r) => srv.listen(0, "127.0.0.1", r));
+  const start = async (extra) => {
+    const real = createGateway({ config: validateConfig({ apps: [{ name: "a", keyHash: hashKey("k".repeat(30)), allow: [] }], auditLogDir: null, ...extra }), od: createClient({ baseUrl: od.url, developerKey: "dev1", customerKey: "cust1" }) });
+    const srv = http.createServer(real);
+    await new Promise((r) => srv.listen(0, "127.0.0.1", r));
+    return { srv, gw: createGatewayClient({ url: `http://127.0.0.1:${srv.address().port}`, key: "k".repeat(30) }) };
+  };
+  const live = await start({});
+  const design = await start({ stage: "design" });
   try {
-    const gw = createGatewayClient({ url: `http://127.0.0.1:${srv.address().port}`, key: "k".repeat(30) });
-    assert.equal((await gw.health()).fake, false);
-    await assert.rejects(checkStage(gw, "design"), /Refusing to start/);
-    assert.equal((await checkStage(gw, "live")).fake, false);
+    // The real gateway: live unless set; never fake.
+    assert.deepEqual([(await live.gw.health()).stage, (await live.gw.health()).fake], ["live", false]);
+    await assert.rejects(checkStage(live.gw, "design"), /Refusing to serve patient pages/);
+    assert.equal((await checkStage(live.gw, "live")).stage, "live");
+    // The office gateway serving the Open Dental demo database in the design stage.
+    const dh = await checkStage(design.gw, "design");
+    assert.deepEqual([dh.stage, dh.fake], ["design", false]);
+    await assert.rejects(checkStage(design.gw, "live"), /says stage "design"/);
+    assert.deepEqual(Object.keys(dh).sort(), ["fake", "ok", "service", "stage", "version"]); // nothing sensitive
   } finally {
-    srv.close();
+    live.srv.close();
+    design.srv.close();
     await od.close();
+  }
+});
+
+test("demo gateway starts where the host takes over listen() (Hostinger/LiteSpeed, issue #5)", async () => {
+  const http = require("node:http");
+  const net = require("node:net");
+  const free = await new Promise((r) => {
+    const s = net.createServer().listen(0, "127.0.0.1", () => {
+      const p = s.address().port;
+      s.close(() => r(p));
+    });
+  });
+  const realAddress = http.Server.prototype.address;
+  http.Server.prototype.address = function () {
+    return "/tmp/lshttpd/lsnode.sock"; // what lsnode's patched server reports
+  };
+  let d;
+  try {
+    d = await startDemoGateway({ keys: { daysheet: TEST_KEYS.daysheet }, port: free, today: TODAY, log: false });
+  } finally {
+    http.Server.prototype.address = realAddress;
+  }
+  try {
+    const gw = createGatewayClient({ url: `http://127.0.0.1:${free}`, key: TEST_KEYS.daysheet });
+    assert.equal((await gw.health()).stage, "design");
+    assert.ok((await gw.runReport("daysheet", { date: TODAY })).rows.length >= 10);
+    assert.ok((await gw.request("GET", "/appointments", { params: { date: TODAY } })).length >= 10);
+  } finally {
+    await d.close();
   }
 });
 
@@ -220,6 +263,29 @@ test("report parameters: typed, validated, defaults; xray_history needs patients
   const { raw } = parseReportParams("unscheduled_treatment", { patients: "5,6", min_total: "500" });
   assert.deepEqual([raw.patients, raw.min_total, raw.include_hygiene], [[5, 6], 500, "false"]);
   assert.deepEqual(raw.hygiene_codes, DEFAULT_HYGIENE_CODES);
+});
+
+test("one office-wide hygiene list (hygieneCodes) for every report that uses it", async () => {
+  assert.throws(() => validateConfig({ apps: [], hygieneCodes: ["D1110", "bad code!"] }, { requireApps: false }), /hygieneCodes/);
+  assert.ok(DEFAULT_HYGIENE_CODES.includes("D4341") && !DEFAULT_HYGIENE_CODES.includes("D0330"));
+  const office = buildOffice({ today: TODAY });
+  const fake = await startFakeOD();
+  const od = { ...createClient({ baseUrl: fake.url, developerKey: "dev1", customerKey: "cust1" }), fakeReportRows: (n, p, o) => fakeReportRows(office, n, p, o) };
+  const key = "k".repeat(30);
+  const config = validateConfig({ auditLogDir: null, hygieneCodes: ["D0120"], apps: [{ name: "a", keyHash: hashKey(key), allow: [], reports: ["unscheduled_treatment", "no_future_appointment"] }] });
+  const http = require("node:http");
+  const srv = http.createServer(createGateway({ config, od, fake: true }));
+  await new Promise((r) => srv.listen(0, "127.0.0.1", r));
+  try {
+    const gw = createGatewayClient({ url: `http://127.0.0.1:${srv.address().port}`, key });
+    assert.ok((await gw.runReport("unscheduled_treatment", {})).rows.some((r) => r.ProcCode === "D1110"), "only D0120 is hygiene now");
+    const withList = (await gw.runReport("no_future_appointment", {})).rows;
+    const builtIn = (await runReport({ fakeReportRows: od.fakeReportRows }, "no_future_appointment", {})).rows;
+    assert.ok(withList.reduce((a, r) => a + r.PlannedTotal, 0) >= builtIn.reduce((a, r) => a + r.PlannedTotal, 0));
+  } finally {
+    srv.close();
+    await fake.close();
+  }
 });
 
 test("gateway reportDefaults fill in what the app didn't send", async () => {

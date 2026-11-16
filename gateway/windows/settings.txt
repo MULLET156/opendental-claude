@@ -24,6 +24,11 @@ OPEN_DENTAL_ADDRESS=http://127.0.0.1:30223/api/v1
 # read-all, standard or enterprise
 API_PLAN=
 
+# TDC Office stage: design while this gateway serves Open Dental's DEMO database
+# to the office web apps' prototype (through the tunnel); live for real use.
+# Blank keeps the saved stage (live the first time).
+STAGE=
+
 # --- Lab tracker sync (optional) ---------------------------------------------
 
 # yes or no

@@ -15,20 +15,10 @@ const http = require("node:http");
 const https = require("node:https");
 const path = require("node:path");
 const { createClient } = require("../core/odclient");
-const { loadConfig, ConfigError } = require("./config");
+const { loadConfig, loadEnvFile, ConfigError } = require("./config");
 const { createGateway } = require("./app");
+const { startLabSync } = require("./lab-sync");
 const { version } = require("../package.json");
-
-/** Minimal .env reader: KEY=value lines; real environment variables win. */
-function loadEnvFile(file) {
-  if (!fs.existsSync(file)) return;
-  for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
-    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
-    if (!m || line.trim().startsWith("#")) continue;
-    const value = m[2].replace(/^(['"])(.*)\1$/, "$2");
-    if (process.env[m[1]] === undefined) process.env[m[1]] = value;
-  }
-}
 
 function main() {
   const configPath = path.resolve(process.argv[2] || process.env.GATEWAY_CONFIG || "gateway.config.json");
@@ -80,7 +70,21 @@ function main() {
     }
   });
 
-  const stop = () => server.close(() => process.exit(0));
+  // Lab tracker sync (optional): pushes lab cases out and writes "ready"/"sent" back.
+  let stopSync = () => {};
+  if (config.labSync) {
+    try {
+      stopSync = startLabSync({ od, cfg: config.labSync, secret: process.env.LAB_SYNC_SECRET, audit: handler.audit || (() => {}) });
+      console.log(`Lab tracker sync: every ${config.labSync.intervalMinutes} min to ${new URL(config.labSync.trackerUrl).host}, cases created since ${config.labSync.syncFrom}`);
+    } catch (e) {
+      console.error(`Lab tracker sync not started: ${e.message}`);
+    }
+  }
+
+  const stop = () => {
+    stopSync();
+    server.close(() => process.exit(0));
+  };
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
 }

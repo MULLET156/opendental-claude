@@ -6,6 +6,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
+const { validateLabSync, SyncError } = require("./lab-sync");
 
 const METHODS = ["GET", "POST", "PUT", "DELETE"];
 
@@ -89,7 +90,13 @@ function validateConfig(raw, { requireApps = true } = {}) {
   }
 
   const apps = Array.isArray(raw.apps) ? raw.apps : [];
-  if (requireApps && !apps.length) throw new ConfigError('No apps configured. Add one with: node gateway/cli.js new-key "<app name>"');
+  try {
+    cfg.labSync = validateLabSync(raw.labSync);
+  } catch (e) {
+    if (e instanceof SyncError) throw new ConfigError(e.message);
+    throw e;
+  }
+  if (requireApps && !apps.length && !cfg.labSync) throw new ConfigError('No apps configured. Add one with: node gateway/cli.js new-key "<app name>"');
   const names = new Set();
   const hashes = new Set();
   for (const [i, a] of apps.entries()) {
@@ -143,7 +150,7 @@ function loadConfig(file) {
   const full = path.resolve(file);
   let text;
   try {
-    text = fs.readFileSync(full, "utf8");
+    text = fs.readFileSync(full, "utf8").replace(/^\uFEFF/, ""); // Notepad may add a byte-order mark
   } catch {
     throw new ConfigError(`Can't read config file ${full}. Copy gateway/gateway.config.example.json to start.`);
   }
@@ -180,8 +187,22 @@ function allowsReport(app, name) {
   return app.reports.has("*") || app.reports.has(name);
 }
 
+/** Minimal .env reader: KEY=value lines; real environment variables win. */
+function loadEnvFile(file) {
+  if (!fs.existsSync(file)) return false;
+  const text = fs.readFileSync(file, "utf8").replace(/^\uFEFF/, "");
+  for (const line of text.split(/\r?\n/)) {
+    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
+    if (!m || line.trim().startsWith("#")) continue;
+    const value = m[2].replace(/^(['"])(.*)\1$/, "$2");
+    if (process.env[m[1]] === undefined) process.env[m[1]] = value;
+  }
+  return true;
+}
+
 module.exports = {
   ConfigError,
+  loadEnvFile,
   METHODS,
   newKey,
   hashKey,

@@ -1,0 +1,53 @@
+# Open Dental Gateway - answers for Setup
+#
+# Fill this in with Notepad, save it, then double-click Setup.cmd.
+# Setup uses these answers instead of asking. Anything left blank, Setup asks
+# for, or keeps what it saved before when you run it again.
+#
+# Paste each value after the = sign. No quotes needed.
+#
+# Once Setup has saved your keys securely (readable only by administrators),
+# it blanks out DEVELOPER_KEY, CUSTOMER_KEY and SHARED_SECRET in this file.
+# Don't email this file or put it on a shared drive while the keys are in it.
+
+# --- Open Dental -------------------------------------------------------------
+
+# Your Developer Key and Customer Key, exactly as Open Dental issued them.
+DEVELOPER_KEY=
+CUSTOMER_KEY=
+
+# Where the Open Dental API Service answers. Leave as it is when Setup runs on
+# the Open Dental server itself; otherwise http://<server address>:30223/api/v1
+OPEN_DENTAL_ADDRESS=http://127.0.0.1:30223/api/v1
+
+# Only for the cloud address (https://api.opendental.com/api/v1):
+# read-all, standard or enterprise
+API_PLAN=
+
+# --- Lab tracker sync (optional) ---------------------------------------------
+
+# yes or no
+LAB_SYNC=
+
+# The tracker's sync address, ending in /od-sync.php
+# e.g. https://lab.example.com/od-sync.php
+LAB_TRACKER_ADDRESS=
+
+# LaboratoryNum of your in-house lab(s), separated by commas, or: none
+# Leave blank and Setup lists your labs and asks.
+IN_HOUSE_LABS=
+
+# First day whose new lab cases go to the tracker: a date like 2026-11-16, or
+# "today" (on later runs, "today" keeps the start date already saved).
+SYNC_START_DATE=today
+
+# How patients appear in the tracker: J. Smith  or  J.S.
+PATIENT_FORMAT=J. Smith
+
+# Optional: the same secret that's in the tracker's config.php (OD_SYNC_SECRET).
+# Leave blank and Setup keeps the one it saved before, or makes a new one and
+# shows you the line to add to config.php.
+SHARED_SECRET=
+
+# Send to the tracker once at the end to check it works: yes or no
+SEND_TEST=yes

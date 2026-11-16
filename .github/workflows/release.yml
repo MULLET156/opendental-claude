@@ -1,9 +1,18 @@
 name: Release
-# Builds dist/opendental.mcpb and dist/opendental.plugin and publishes them as a
-# GitHub release named after the version in package.json.
+# Builds dist/opendental.mcpb, dist/opendental.plugin and dist/opendental-gateway-windows-<version>.zip
+# and publishes them on GitHub.
+#   From main (or a v* tag): a release named after the version in package.json.
+#   From any other branch, or with "test build" ticked: a pre-release named
+#   v<version>-test.<run number>, so a pull request can be tried before it's merged.
+#   Pre-releases never become the "latest" release.
 # Run it from the Actions tab ("Run workflow"), or push a tag like v0.3.0.
 on:
   workflow_dispatch:
+    inputs:
+      test:
+        description: "Test build (pre-release)"
+        type: boolean
+        default: false
   push:
     tags: ["v*"]
 permissions:
@@ -20,20 +29,32 @@ jobs:
       - run: npm run build
       - name: Work out the tag
         id: tag
+        env:
+          TEST_INPUT: ${{ inputs.test }}
         run: |
-          TAG="v$(node -p "require('./package.json').version")"
+          VERSION="$(node -p "require('./package.json').version")"
+          TAG="v$VERSION"
           if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "$TAG" ]; then
             echo "Tag ${GITHUB_REF_NAME} does not match package.json version ($TAG)"; exit 1
           fi
+          TEST=false
+          if [ "$TEST_INPUT" = "true" ]; then TEST=true; fi
+          if [ "${GITHUB_REF_TYPE}" = "branch" ] && [ "${GITHUB_REF_NAME}" != "main" ]; then TEST=true; fi
+          if [ "$TEST" = "true" ]; then TAG="v$VERSION-test.${GITHUB_RUN_NUMBER}"; fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "test=$TEST" >> "$GITHUB_OUTPUT"
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.tag.outputs.tag }}
+          TEST: ${{ steps.tag.outputs.test }}
         run: |
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/opendental.mcpb dist/opendental.plugin --clobber
+          FILES="dist/opendental.mcpb dist/opendental.plugin $(ls dist/opendental-gateway-windows-*.zip)"
+          if [ "$TEST" = "true" ]; then
+            printf 'Test build from branch `%s` (commit %s), for trying changes before they are merged. Not a regular release.\n\nSee CHANGELOG.md on that branch for what changed.\n' "$GITHUB_REF_NAME" "${GITHUB_SHA:0:7}" > notes.md
+            gh release create "$TAG" $FILES --target "$GITHUB_SHA" --title "$TAG (test build)" --notes-file notes.md --prerelease --latest=false
+          elif gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" $FILES --clobber
           else
-            gh release create "$TAG" dist/opendental.mcpb dist/opendental.plugin \
-              --target "$GITHUB_SHA" --title "$TAG" --notes-file CHANGELOG.md
+            gh release create "$TAG" $FILES --target "$GITHUB_SHA" --title "$TAG" --notes-file CHANGELOG.md
           fi

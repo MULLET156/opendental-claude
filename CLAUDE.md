@@ -14,8 +14,9 @@
 
 1. `npm test` (all tests must pass) and `npm run build`.
 2. Commit to `main` and push. CI runs the tests on Windows and Linux.
-3. To publish: bump the version (a released version number is never reused), push, then run the **Release** workflow (Actions tab or `workflow_dispatch`). It builds `opendental.mcpb` and `opendental.plugin` and creates the GitHub release.
-4. The Google Drive folder "Open Dental Claude Connector" is a copy for convenience; refresh it after a release.
+3. To publish: bump the version (a released version number is never reused), push, then run the **Release** workflow (Actions tab or `workflow_dispatch`). It builds `opendental.mcpb`, `opendental.plugin` and the Windows gateway zip and creates the GitHub release.
+4. Every gateway change you hand out gets a new version number (the Windows zip is named `opendental-gateway-windows-<version>.zip`), is pushed to its branch, and is published as a test pre-release by running the **Release** workflow on that branch, so GitHub has the same file the user has.
+5. The Google Drive folder "Open Dental Claude Connector" is a copy for convenience; refresh it after a release.
 
 ## Layout
 

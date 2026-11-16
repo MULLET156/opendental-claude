@@ -21,6 +21,8 @@ The gateway handles patient data, so run it somewhere you'd be comfortable keepi
 
 ## Set up
 
+**Installing on a Windows office server?** Download **opendental-gateway-windows-&lt;version&gt;.zip** from the latest release and run **Setup.cmd**; see **[install-gateway-windows.md](install-gateway-windows.md)**.
+
 ```bash
 git clone https://github.com/MULLET156/opendental-claude.git
 cd opendental-claude
@@ -56,6 +58,10 @@ node gateway/server.js
 - **Windows (typical Open Dental server):** use Task Scheduler ("At startup", run `node.exe` with arguments `gateway\server.js C:\path\to\gateway.config.json`, start in the repo folder, run whether user is logged on or not), or a service wrapper such as NSSM.
 - **Linux:** a systemd unit with `ExecStart=/usr/bin/node /opt/opendental-claude/gateway/server.js /etc/odgw/gateway.config.json` and `Restart=always`.
 - **Docker:** see the `Dockerfile` in the repo root; mount your config and pass the `OD_*` variables.
+
+## Lab tracker sync
+
+The gateway can also keep a web-hosted lab case tracker in step with Open Dental: new lab cases are pushed to the tracker, and "ready" (and "sent" for outside labs) are written back. See **[lab-tracker-sync.md](lab-tracker-sync.md)**.
 
 ## Configuration
 

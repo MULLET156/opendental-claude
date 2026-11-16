@@ -337,6 +337,25 @@ WHERE lc.DateTimeRecd = a.AptDateTime AND a.AptStatus = 2${and(p.before && `a.Ap
 ORDER BY a.AptDateTime, lc.LabCaseNum LIMIT ${Math.min(Math.max(Number(p.limit), 1), 5000)}`,
   },
 
+  lab_cases_for_sync: {
+    category: "lab",
+    description:
+      "Lab cases for the lab-tracker sync: created on or after 'since', still open or checked within the last keep_days days. Returns only the patient's first initial and last name, never DOB, chart number or PatNum.",
+    params: { since: { type: "date", required: true }, keep_days: { type: "int", default: 30 }, limit: { type: "int", default: 2000 } },
+    sql: (p) => `SELECT lc.LabCaseNum, LEFT(TRIM(p.FName), 1) AS FirstInitial, TRIM(p.LName) AS LastName,
+  lc.LaboratoryNum, l.Description AS Lab, pr.Abbr AS Provider,
+  lc.DateTimeCreated, lc.DateTimeSent, lc.DateTimeDue, lc.DateTimeRecd, lc.DateTimeChecked,
+  lc.AptNum, a.AptDateTime AS SeatAppt, a.AptStatus AS SeatStatus
+FROM labcase lc
+JOIN patient p ON p.PatNum = lc.PatNum
+LEFT JOIN laboratory l ON l.LaboratoryNum = lc.LaboratoryNum
+LEFT JOIN provider pr ON pr.ProvNum = lc.ProvNum
+LEFT JOIN appointment a ON a.AptNum = lc.AptNum
+WHERE lc.DateTimeCreated >= ${p.since}
+  AND (lc.DateTimeChecked < '1880-01-01' OR lc.DateTimeChecked >= DATE_SUB(CURDATE(), INTERVAL ${Math.min(Math.max(Number(p.keep_days), 0), 365)} DAY))
+ORDER BY lc.DateTimeCreated, lc.LabCaseNum LIMIT ${Math.min(Math.max(Number(p.limit), 1), 5000)}`,
+  },
+
   operatories: {
     category: "schedule",
     description: "Operatories (chairs) with assigned providers.",

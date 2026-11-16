@@ -4,6 +4,7 @@
  * Build the installable files into dist/ with no npm dependencies:
  *   dist/opendental.mcpb    Claude desktop extension (the connector)
  *   dist/opendental.plugin  Claude plugin (the skills)
+ *   dist/opendental-gateway-windows-<version>.zip  app gateway with the Windows setup
  *
  *   node scripts/build.js
  */
@@ -137,14 +138,62 @@ function buildPlugin() {
   return zip(walk(path.join(ROOT, "plugin")));
 }
 
+const WINDOWS_README = `Open Dental Gateway for Windows
+==============================
+
+1. Extract this whole zip (right-click > Extract All).
+2. Optional but easiest: open settings.txt in Notepad, fill in your Open Dental
+   keys (and the lab tracker settings if you use it), and save. Setup then uses
+   those answers instead of asking, and blanks the keys out of the file once
+   they're saved securely.
+3. Double-click Setup.cmd. Windows asks for administrator permission; if it shows
+   "Windows protected your PC", click More info > Run anyway.
+
+Setup downloads Node.js (checked against nodejs.org's checksums) into the install
+folder (C:\\OpenDentalGateway), tests your Open Dental keys, can set up the lab
+tracker sync, and starts the gateway in the background with Windows.
+To change settings later, edit C:\\OpenDentalGateway\\settings.txt and run
+C:\\OpenDentalGateway\\Setup.cmd. To update, download the newer zip and run its
+Setup.cmd; your keys and settings are kept.
+
+Guide: https://github.com/MULLET156/opendental-claude/blob/main/docs/install-gateway-windows.md
+`;
+
+/** The Windows download's file name carries the gateway version, e.g. opendental-gateway-windows-0.8.0.zip. */
+function gatewayZipName() {
+  return `opendental-gateway-windows-${JSON.parse(read("package.json")).version}.zip`;
+}
+
+/** Windows download: Setup.cmd + README.txt at the top, the gateway under app/. */
+function buildGatewayWindows() {
+  const crlf = (b) => Buffer.from(b.toString("utf8").replace(/\r?\n/g, "\r\n"), "utf8");
+  const entries = [
+    { name: "Setup.cmd", data: crlf(read("gateway/windows/Setup.cmd")) },
+    { name: "README.txt", data: crlf(Buffer.from(WINDOWS_README)) },
+    { name: "settings.txt", data: crlf(read("gateway/windows/settings.txt")) },
+    { name: "app/package.json", data: read("package.json") },
+    { name: "app/LICENSE", data: read("LICENSE") },
+    ...walk(path.join(ROOT, "core")).map((e) => ({ name: `app/core/${e.name}`, data: e.data })),
+    ...walk(path.join(ROOT, "gateway"))
+      .filter((e) => !/(^|\/)\.env$|^gateway\.config\.json$|^logs\//.test(e.name))
+      .map((e) => ({ name: `app/gateway/${e.name}`, data: /\.(ps1|cmd|txt)$/.test(e.name) ? crlf(e.data) : e.data })),
+  ];
+  return { data: zip(entries), names: entries.map((e) => e.name) };
+}
+
 if (require.main === module) {
   fs.mkdirSync(DIST, { recursive: true });
   const ext = buildExtension();
   fs.writeFileSync(path.join(DIST, "opendental.mcpb"), ext);
   const plug = buildPlugin();
   fs.writeFileSync(path.join(DIST, "opendental.plugin"), plug);
+  const win = buildGatewayWindows().data;
+  const winName = gatewayZipName();
+  for (const old of fs.readdirSync(DIST)) if (/^opendental-gateway-windows.*\.zip$/.test(old)) fs.rmSync(path.join(DIST, old));
+  fs.writeFileSync(path.join(DIST, winName), win);
   console.log(`dist/opendental.mcpb    ${(ext.length / 1024).toFixed(1)} KB`);
   console.log(`dist/opendental.plugin  ${(plug.length / 1024).toFixed(1)} KB`);
+  console.log(`dist/${winName}  ${(win.length / 1024).toFixed(1)} KB`);
 }
 
-module.exports = { zip, crc32, buildExtension, buildPlugin };
+module.exports = { zip, crc32, buildExtension, buildPlugin, buildGatewayWindows, gatewayZipName };

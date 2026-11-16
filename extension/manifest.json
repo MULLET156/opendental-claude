@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "opendental",
   "display_name": "Open Dental",
-  "version": "0.8.2",
+  "version": "0.9.0",
   "description": "Connect Claude to Open Dental: schedule, patients, chart notes, treatment planning, lab cases, A/R, claims and production reports. Independent project, not affiliated with Open Dental Software.",
   "long_description": "Reads your Open Dental database through the official Open Dental API (cloud, API Service or Local API). Read-only unless you turn on \"Allow changes\", which lets Claude book, move, confirm or break appointments and add commlog and appointment notes after you approve each one. SSNs are removed from every result, and report queries are limited to read-only SQL.",
   "author": {

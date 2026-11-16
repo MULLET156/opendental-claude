@@ -18,7 +18,7 @@
 
 const crypto = require("node:crypto");
 const { ODError, validDate } = require("../core/odclient");
-const { buildReport } = require("../core/reports");
+const { runReport } = require("../core/reports");
 
 const KEY_RE = /^od-[a-f0-9]{24}$/;
 
@@ -169,7 +169,7 @@ async function call(cfg, secret, payload, fetchImpl) {
  */
 async function runLabSync({ od, cfg, secret, fetch: fetchImpl = globalThis.fetch, dryRun = false }) {
   checkSecret(secret);
-  const { rows } = await od.shortQuery(buildReport("lab_cases_for_sync", { since: cfg.syncFrom, keep_days: cfg.keepDays }), { limit: 2000 });
+  const { rows } = await runReport(od, "lab_cases_for_sync", { since: cfg.syncFrom, keep_days: cfg.keepDays }, { limit: 2000 });
   const byKey = new Map();
   for (const r of rows) byKey.set(caseKey(secret, r.LabCaseNum), r);
   const cases = rows.map((r) => toTracker(r, cfg, secret));

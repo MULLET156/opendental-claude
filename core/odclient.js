@@ -202,8 +202,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * @param {number} [opts.maxRetries=3]  Retries on 429/502/503/504.
  * @param {number} [opts.maxRetryWaitMs=30000]
  * @param {Function} [opts.fetch]       Injected fetch for tests.
+ * @param {string} [opts.gatewayUrl]    Gateway mode: go through the app gateway instead (see gateway-client.js).
+ * @param {string} [opts.gatewayKey]    Gateway mode: this module's app key.
  */
 function createClient(opts = {}) {
+  // Gateway mode (TDC Office modules): same interface, but through the gateway with an app key.
+  if (opts.gatewayUrl || opts.gatewayKey) {
+    const { createGatewayClient } = require("./gateway-client");
+    return createGatewayClient({ ...opts, url: opts.gatewayUrl, key: opts.gatewayKey });
+  }
   const baseUrl = normalizeBaseUrl(opts.baseUrl);
   const developerKey = (opts.developerKey || "").trim();
   const customerKey = (opts.customerKey || "").trim();
@@ -360,7 +367,7 @@ function createClient(opts = {}) {
     return getAll("/queries/ShortQuery", {}, { limit, method: "PUT", body: { SqlCommand: safe } });
   }
 
-  return { baseUrl, isCloud, maxRows, minIntervalMs, request, getAll, shortQuery };
+  return { mode: "direct", baseUrl, isCloud, maxRows, minIntervalMs, request, getAll, shortQuery };
 }
 
 module.exports = {

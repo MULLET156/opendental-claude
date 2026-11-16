@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.0 — 2026-11-15
+
+For the TDC Office web apps (design stage). See `docs/tdc-office.md`.
+
+- **Gateway mode for `core/`:** `createClient({ gatewayUrl, gatewayKey })` (or `createGatewayClient`) gives the same client interface, but every call goes through the gateway with the module's own key. The existing tools (notes, group notes, planning, priorities, status, read-back checks) work unchanged. `runReport()` runs a named report on any client (gateway, direct or demo). `checkStage()` makes a module refuse to start in `TDC_STAGE=design` unless the gateway is the fake one.
+- **Demo gateway with fake data:** `npm start` (Hostinger Node.js app) and `npm run dev` / `start-demo.cmd` (this computer, published test keys). A made-up office with a schedule today, planned treatment, insurance maximums and x-ray limits, benefits used, unsigned notes and lab cases; writes work and show up in reports. It never talks to real Open Dental and refuses Open Dental keys. `/health` now includes `"fake"` (always `false` on the real gateway).
+- **Reports:** `daysheet`, `unscheduled_treatment` (hygiene left out by default; `reportDefaults` in the gateway config can set the office's list), `no_future_appointment`, `xray_history` (last BWX/FMX/pano/PA, the plan's frequency limit and next-covered date), `insurance_remaining` (an estimate), `unsigned_notes`. Reports now list their output columns.
+- **Module presets:** `node gateway/cli.js new-key daysheet` (also `finder`, `voice`, `numbers`) prints a config entry with that module's narrowest permissions. Only Voice Charting may write.
+- **`scripts/sync-core.js`** for module repos: copies `core/` at a released version (or a test build) into `vendor/opendental-core/` with `VERSION` and `CHECKSUMS`.
+- The Windows gateway download leaves out the demo.
+
 ## 0.8.2 — 2026-11-14
 
 - **Windows setup reads `settings.txt`:** fill in the keys and lab sync settings in Notepad before running `Setup.cmd`, and Setup uses them instead of asking. The only stop left is pasting a new shared secret into the tracker's `config.php`, and none if `SHARED_SECRET` is filled in. Values are checked: a key with a label or punctuation, an unknown lab number or a bad date makes Setup say why and ask instead. Once saved securely, the keys and secret are blanked out of `settings.txt`, and a copy without them is kept in `C:\OpenDentalGateway` for next time. On later runs, `SYNC_START_DATE=today` keeps the start date already saved.

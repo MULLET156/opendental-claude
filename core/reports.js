@@ -12,7 +12,10 @@
  * Status codes (Open Dental schema):
  *   procedurelog.ProcStatus  1 TP, 2 Complete, 6 Deleted ...
  *   claimproc.Status         1 Received, 4 Supplemental, 7 CapComplete ...
- *   appointment.AptStatus    1 Scheduled, 2 Complete, 3 UnschedList, 5 Broken
+ *   appointment.AptStatus    1 Scheduled, 2 Complete, 3 UnschedList, 5 Broken, 6 Planned
+ *   benefit.BenefitType      5 Limitations (annual max, frequency limits)
+ *   benefit.QuantityQualifier 1 NumberOfServices, 4 Years, 5 Months
+ *   benefit.TimePeriod       1 ServiceYear, 2 CalendarYear, 3 Lifetime, 5 NumberInLast12Months
  *   claim.ClaimStatus        U unsent, H hold, W waiting, S sent, R received
  */
 
@@ -84,6 +87,121 @@ const enumType = (...values) => ({
 // Helpers to keep filters optional.
 const and = (cond) => (cond ? ` AND ${cond}` : "");
 const PROD = "pl.ProcFee * (pl.UnitQty + pl.BaseUnits)";
+
+const cap = (n, max = 5000) => Math.min(Math.max(Number(n), 1), max);
+const round2 = (n) => Math.round(Number(n) * 100) / 100;
+const truthy = (v) => v === true || v === 1 || v === "1" || v === "true";
+
+/** "2026-11-16", "2026-11-16 00:00:00", a Date, or Open Dental's "0001-01-01" -> "yyyy-MM-dd" or null. */
+function dateOnly(v) {
+  if (v === null || v === undefined || v === "") return null;
+  const s = v instanceof Date ? v.toISOString() : String(v);
+  const d = s.slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(d) && d > "1880-01-01" ? d : null;
+}
+
+const APT_STATUS = { 1: "Scheduled", 2: "Complete", 3: "UnschedList", 4: "ASAP", 5: "Broken", 6: "Planned", 7: "PtNote", 8: "PtNoteCompleted" };
+
+/**
+ * Codes treated as hygiene for "planned but not scheduled" lists (PLAN.md: hygiene is
+ * left out). Ryan still has to confirm the exact list; reports take hygiene_codes, and
+ * the gateway config can set a default (reportDefaults).
+ */
+const DEFAULT_HYGIENE_CODES = [
+  "D0120", "D0140", "D0150", "D0180", // exams
+  "D0210", "D0220", "D0230", "D0270", "D0272", "D0273", "D0274", "D0277", "D0330", // x-rays
+  "D1110", "D1120", "D1206", "D1208", "D4346", "D4910", // prophy, fluoride, perio maintenance
+];
+
+/** X-ray categories for xray_history. */
+const XRAY_CATEGORIES = {
+  BWX: ["D0270", "D0272", "D0273", "D0274", "D0277"],
+  FMX: ["D0210"],
+  PANO: ["D0330"],
+  PA: ["D0220", "D0230"],
+};
+
+// Open Dental benefit enums (benefit.QuantityQualifier, benefit.TimePeriod).
+const QTY = { NumberOfServices: 1, Years: 4, Months: 5 };
+const PERIOD = { None: 0, ServiceYear: 1, CalendarYear: 2, Lifetime: 3, Years: 4, NumberInLast12Months: 5 };
+
+function addMonths(iso, n) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const t = new Date(Date.UTC(y, m - 1 + n, 1));
+  const last = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 0)).getUTCDate();
+  t.setUTCDate(Math.min(d, last));
+  return t.toISOString().slice(0, 10);
+}
+
+/** Start of the benefit year containing `today`. monthRenew 0/1 = calendar year. */
+function benefitYearStart(today, monthRenew, calendar) {
+  const [y, m] = today.split("-").map(Number);
+  const mr = calendar || !monthRenew || Number(monthRenew) <= 1 ? 1 : Number(monthRenew);
+  const year = m >= mr ? y : y - 1;
+  return `${year}-${String(mr).padStart(2, "0")}-01`;
+}
+
+/**
+ * Turn one xray_history query row into the report row: last date, limit text,
+ * next covered date and whether it's covered today (insurance frequency only).
+ */
+function xrayRow(r) {
+  const today = dateOnly(r.AsOf) || new Date().toISOString().slice(0, 10);
+  const dates = String(r.Dates || "").split(",").map(dateOnly).filter(Boolean).sort().reverse();
+  const last = dates[0] || null;
+  const yearAgo = addMonths(today, -12);
+  const countLast12 = dates.filter((d) => d > yearAgo && d <= today).length;
+  const out = {
+    PatNum: r.PatNum,
+    LName: r.LName,
+    FName: r.FName,
+    Category: r.Category,
+    LastDate: last,
+    CountLast12Months: countLast12,
+    Carrier: r.Carrier || null,
+    Limit: null,
+    NextCovered: null,
+    CoveredNow: null,
+    AsOf: today,
+  };
+  if (!r.Carrier) {
+    out.Limit = "No insurance on file";
+    return out;
+  }
+  const f = String(r.Frequency || "").split("|").map(Number);
+  if (f.length < 3 || f.some((x) => !Number.isFinite(x))) {
+    out.Limit = "No frequency limit on file";
+    return out;
+  }
+  const [qty, qual, period] = f;
+  const n = Math.max(1, qty || 1);
+  let next = today;
+  if (qual === QTY.Months || qual === QTY.Years) {
+    const months = qual === QTY.Months ? n : n * 12;
+    out.Limit = qual === QTY.Months ? `1 per ${n} months` : `1 per ${n} year${n === 1 ? "" : "s"}`;
+    if (last) next = addMonths(last, months);
+  } else if (qual === QTY.NumberOfServices) {
+    if (period === PERIOD.NumberInLast12Months) {
+      out.Limit = `${n} per 12 months`;
+      const recent = dates.filter((d) => d > yearAgo && d <= today);
+      if (recent.length >= n) next = addMonths(recent[n - 1], 12);
+    } else if (period === PERIOD.Lifetime) {
+      out.Limit = `${n} per lifetime`;
+      if (dates.length >= n) next = null;
+    } else {
+      const calendar = period === PERIOD.CalendarYear;
+      out.Limit = `${n} per ${calendar ? "calendar" : "benefit"} year`;
+      const start = benefitYearStart(today, r.MonthRenew, calendar);
+      if (dates.filter((d) => d >= start && d <= today).length >= n) next = addMonths(start, 12);
+    }
+  } else {
+    out.Limit = "No frequency limit on file";
+    return out;
+  }
+  out.NextCovered = next;
+  out.CoveredNow = next !== null && next <= today;
+  return out;
+}
 
 // ------------------------------------------------------------------ catalog
 
@@ -356,6 +474,223 @@ WHERE lc.DateTimeCreated >= ${p.since}
 ORDER BY lc.DateTimeCreated, lc.LabCaseNum LIMIT ${Math.min(Math.max(Number(p.limit), 1), 5000)}`,
   },
 
+  // ---------------------------------------------------------------- TDC Office reports
+  // Each lists its output `columns`; `post` runs after the query (here and in the
+  // demo gateway) to add values that are clearer in code than in SQL.
+
+  unscheduled_treatment: {
+    category: "treatment",
+    description:
+      "Treatment-planned procedures that are not on a scheduled (future) appointment, for active patients. Hygiene codes are left out unless include_hygiene=true; hygiene_codes sets that list. min_fee filters single procedures, min_total filters patients by their unscheduled total.",
+    params: {
+      provider: { type: "id" },
+      codes: { type: "codes" },
+      min_fee: { type: "money" },
+      min_total: { type: "money" },
+      hygiene_codes: { type: "codes", default: DEFAULT_HYGIENE_CODES },
+      include_hygiene: { type: enumType("true", "false"), default: "false" },
+      patients: { type: "ids" },
+      limit: { type: "int", default: 2000 },
+    },
+    columns: ["PatNum", "LName", "FName", "ProcNum", "ProcCode", "Descript", "ToothNum", "Surf", "Fee", "ProvNum", "Provider", "DateTP", "Priority", "AptNum", "PatientTotal", "AsOf"],
+    sql: (p) => `SELECT pl.PatNum, p.LName, p.FName, pl.ProcNum, pc.ProcCode, pc.Descript, pl.ToothNum, pl.Surf,
+  ROUND(${PROD}, 2) AS Fee, pl.ProvNum, pr.Abbr AS Provider, pl.DateTP, IFNULL(d.ItemName, '') AS Priority, pl.AptNum, CURDATE() AS AsOf
+FROM procedurelog pl
+JOIN patient p ON p.PatNum = pl.PatNum
+JOIN procedurecode pc ON pc.CodeNum = pl.CodeNum
+LEFT JOIN provider pr ON pr.ProvNum = pl.ProvNum
+LEFT JOIN definition d ON d.DefNum = pl.Priority
+WHERE pl.ProcStatus = 1 AND p.PatStatus = 0
+  AND NOT EXISTS (SELECT 1 FROM appointment a WHERE a.AptNum = pl.AptNum AND a.AptStatus = 1 AND a.AptDateTime >= CURDATE())${and(p.include_hygiene !== "true" && `pc.ProcCode NOT IN (${p.hygiene_codes})`)}${and(p.provider && `pl.ProvNum = ${p.provider}`)}${and(p.codes && `pc.ProcCode IN (${p.codes})`)}${and(p.min_fee && `${PROD} >= ${p.min_fee}`)}${and(p.patients && `pl.PatNum IN (${p.patients})`)}
+ORDER BY p.LName, p.FName, pl.PatNum, pl.DateTP, pl.ProcNum LIMIT ${cap(p.limit)}`,
+    post(rows, p) {
+      const totals = new Map();
+      for (const r of rows) totals.set(r.PatNum, round2((totals.get(r.PatNum) || 0) + Number(r.Fee || 0)));
+      return rows
+        .map((r) => ({ ...r, Fee: Number(r.Fee), DateTP: dateOnly(r.DateTP), AsOf: dateOnly(r.AsOf), PatientTotal: totals.get(r.PatNum) }))
+        .filter((r) => p.min_total === undefined || r.PatientTotal >= p.min_total);
+    },
+  },
+
+  no_future_appointment: {
+    category: "patients",
+    description:
+      "Active patients with no scheduled appointment from today on, with their last completed visit and planned (unscheduled or not) treatment total. Patients never seen are left out unless include_never_seen=true.",
+    params: {
+      last_visit_after: { type: "date" },
+      last_visit_before: { type: "date" },
+      provider: { type: "id" },
+      include_never_seen: { type: enumType("true", "false"), default: "false" },
+      limit: { type: "int", default: 2000 },
+    },
+    columns: ["PatNum", "LName", "FName", "PriProv", "Provider", "LastVisit", "PlannedTotal", "AsOf"],
+    sql: (p) => `SELECT p.PatNum, p.LName, p.FName, p.PriProv, pr.Abbr AS Provider,
+  (SELECT DATE(MAX(a.AptDateTime)) FROM appointment a WHERE a.PatNum = p.PatNum AND a.AptStatus = 2) AS LastVisit,
+  (SELECT ROUND(IFNULL(SUM(${PROD}), 0), 2) FROM procedurelog pl WHERE pl.PatNum = p.PatNum AND pl.ProcStatus = 1) AS PlannedTotal,
+  CURDATE() AS AsOf
+FROM patient p
+LEFT JOIN provider pr ON pr.ProvNum = p.PriProv
+WHERE p.PatStatus = 0
+  AND NOT EXISTS (SELECT 1 FROM appointment a WHERE a.PatNum = p.PatNum AND a.AptStatus = 1 AND a.AptDateTime >= CURDATE())${and(p.provider && `p.PriProv = ${p.provider}`)}
+HAVING ${p.include_never_seen === "true" ? "1 = 1" : "LastVisit IS NOT NULL"}${and(p.last_visit_after && `LastVisit >= ${p.last_visit_after}`)}${and(p.last_visit_before && `LastVisit < ${p.last_visit_before}`)}
+ORDER BY LastVisit DESC, p.PatNum LIMIT ${cap(p.limit)}`,
+    post: (rows) => rows.map((r) => ({ ...r, LastVisit: dateOnly(r.LastVisit), PlannedTotal: Number(r.PlannedTotal || 0), AsOf: dateOnly(r.AsOf) })),
+  },
+
+  xray_history: {
+    category: "patients",
+    description:
+      "Last bitewing (BWX), full-mouth (FMX), panoramic (PANO) and periapical (PA) x-ray dates per patient, with the primary plan's frequency limit and the date it's next covered. Give patients (PatNums) or date (everyone on that day's schedule). Insurance limits come from the plan's benefit table; it is not a live eligibility check.",
+    params: { patients: { type: "ids" }, date: { type: "date" }, limit: { type: "int", default: 2000 } },
+    columns: ["PatNum", "LName", "FName", "Category", "LastDate", "CountLast12Months", "Carrier", "Limit", "NextCovered", "CoveredNow", "AsOf"],
+    check(p) {
+      if (!p.patients && !p.date) throw new Error('needs "patients" or "date"');
+    },
+    sql: (p) => {
+      const who = p.patients
+        ? `(SELECT p0.PatNum FROM patient p0 WHERE p0.PatNum IN (${p.patients}))`
+        : `(SELECT DISTINCT a0.PatNum FROM appointment a0 WHERE a0.AptDateTime >= ${p.date} AND a0.AptDateTime < DATE_ADD(${p.date}, INTERVAL 1 DAY) AND a0.AptStatus IN (1, 2))`;
+      const blocks = Object.entries(XRAY_CATEGORIES).map(([cat, codes]) => {
+        const list = codes.map((c) => `'${c}'`).join(",");
+        const inGroup = codes.map((c) => `LOCATE('${c}', cg.ProcCodes) > 0`).join(" OR ");
+        return `SELECT ps.PatNum, p.LName, p.FName, '${cat}' AS Category,
+  (SELECT GROUP_CONCAT(DISTINCT DATE(pl.ProcDate) ORDER BY pl.ProcDate DESC SEPARATOR ',') FROM procedurelog pl JOIN procedurecode pc ON pc.CodeNum = pl.CodeNum
+    WHERE pl.PatNum = ps.PatNum AND pl.ProcStatus IN (2, 3, 4) AND pc.ProcCode IN (${list}) AND pl.ProcDate >= DATE_SUB(CURDATE(), INTERVAL 10 YEAR)) AS Dates,
+  ca.CarrierName AS Carrier, ip.MonthRenew,
+  (SELECT CONCAT_WS('|', b.Quantity, b.QuantityQualifier, b.TimePeriod) FROM benefit b
+    WHERE b.BenefitType = 5 AND (b.PlanNum = ip.PlanNum OR b.PatPlanNum = pp.PatPlanNum) AND b.QuantityQualifier IN (1, 4, 5)
+      AND (b.CodeNum IN (SELECT pc2.CodeNum FROM procedurecode pc2 WHERE pc2.ProcCode IN (${list}))
+        OR b.CodeGroupNum IN (SELECT cg.CodeGroupNum FROM codegroup cg WHERE ${inGroup}))
+    ORDER BY b.PatPlanNum DESC, b.BenefitNum LIMIT 1) AS Frequency,
+  CURDATE() AS AsOf
+FROM ${who} ps
+JOIN patient p ON p.PatNum = ps.PatNum
+LEFT JOIN patplan pp ON pp.PatNum = ps.PatNum AND pp.Ordinal = 1
+LEFT JOIN inssub isub ON isub.InsSubNum = pp.InsSubNum
+LEFT JOIN insplan ip ON ip.PlanNum = isub.PlanNum
+LEFT JOIN carrier ca ON ca.CarrierNum = ip.CarrierNum`;
+      });
+      return `SELECT * FROM (\n${blocks.join("\nUNION ALL\n")}\n) x ORDER BY x.LName, x.FName, x.PatNum, FIELD(x.Category, ${Object.keys(XRAY_CATEGORIES).map((c) => `'${c}'`).join(", ")}) LIMIT ${cap(p.limit)}`;
+    },
+    post: (rows) => rows.map(xrayRow),
+  },
+
+  insurance_remaining: {
+    category: "patients",
+    description:
+      "ESTIMATE of each patient's primary dental plan for the current benefit year: annual maximum, insurance used so far (paid plus pending estimates) and remaining. Based on what's recorded in Open Dental, not a live check with the insurer.",
+    params: { patients: { type: "ids" }, carrier: { type: "id" }, min_remaining: { type: "money" }, limit: { type: "int", default: 2000 } },
+    columns: ["PatNum", "LName", "FName", "Carrier", "GroupName", "BenefitYearStart", "AnnualMax", "Used", "Remaining", "IsEstimate", "AsOf"],
+    sql: (p) => `SELECT t.PatNum, t.LName, t.FName, t.Carrier, t.GroupName, t.BenefitYearStart, t.AnnualMax,
+  (SELECT ROUND(IFNULL(SUM(CASE WHEN cp.Status = 0 THEN cp.InsPayEst ELSE cp.InsPayAmt END), 0), 2) FROM claimproc cp
+    WHERE cp.PatNum = t.PatNum AND cp.InsSubNum = t.InsSubNum AND cp.Status IN (0, 1, 3, 4, 9)
+      AND cp.ProcDate >= t.BenefitYearStart AND cp.ProcDate < DATE_ADD(t.BenefitYearStart, INTERVAL 1 YEAR)) AS Used,
+  t.AsOf
+FROM (SELECT pp.PatNum, p.LName, p.FName, pp.InsSubNum, ca.CarrierName AS Carrier, ip.GroupName,
+    CASE WHEN ip.MonthRenew IN (0, 1) THEN MAKEDATE(YEAR(CURDATE()), 1)
+         WHEN ip.MonthRenew <= MONTH(CURDATE()) THEN STR_TO_DATE(CONCAT(YEAR(CURDATE()), '-', ip.MonthRenew, '-01'), '%Y-%m-%d')
+         ELSE STR_TO_DATE(CONCAT(YEAR(CURDATE()) - 1, '-', ip.MonthRenew, '-01'), '%Y-%m-%d') END AS BenefitYearStart,
+    (SELECT b.MonetaryAmt FROM benefit b
+      WHERE b.BenefitType = 5 AND b.CovCatNum = 0 AND b.CodeNum = 0 AND b.MonetaryAmt > 0 AND b.QuantityQualifier = 0
+        AND b.TimePeriod IN (1, 2) AND b.CoverageLevel <> 2 AND (b.PlanNum = ip.PlanNum OR b.PatPlanNum = pp.PatPlanNum)
+      ORDER BY b.PatPlanNum DESC, b.BenefitNum LIMIT 1) AS AnnualMax,
+    CURDATE() AS AsOf
+  FROM patplan pp
+  JOIN patient p ON p.PatNum = pp.PatNum
+  JOIN inssub isub ON isub.InsSubNum = pp.InsSubNum
+  JOIN insplan ip ON ip.PlanNum = isub.PlanNum
+  JOIN carrier ca ON ca.CarrierNum = ip.CarrierNum
+  WHERE pp.Ordinal = 1 AND p.PatStatus = 0${and(p.patients && `pp.PatNum IN (${p.patients})`)}${and(p.carrier && `ip.CarrierNum = ${p.carrier}`)}) t
+ORDER BY t.LName, t.FName, t.PatNum LIMIT ${cap(p.limit)}`,
+    post(rows, p) {
+      return rows
+        .map((r) => {
+          const max = r.AnnualMax === null || r.AnnualMax === undefined || r.AnnualMax === "" ? null : Number(r.AnnualMax);
+          const used = round2(Number(r.Used || 0));
+          return {
+            ...r,
+            BenefitYearStart: dateOnly(r.BenefitYearStart),
+            AnnualMax: max,
+            Used: used,
+            Remaining: max === null ? null : Math.max(0, round2(max - used)),
+            IsEstimate: true,
+            AsOf: dateOnly(r.AsOf),
+          };
+        })
+        .filter((r) => p.min_remaining === undefined || (r.Remaining !== null && r.Remaining >= p.min_remaining));
+    },
+  },
+
+  daysheet: {
+    category: "schedule",
+    description:
+      "One day's appointments (scheduled and complete; broken too with include_broken=true) with patient, provider, hygienist, operatory, confirmation, length and procedures.",
+    params: { date: { type: "date", required: true }, provider: { type: "id" }, op: { type: "id" }, include_broken: { type: enumType("true", "false"), default: "false" } },
+    columns: ["AptNum", "AptDateTime", "Time", "Minutes", "Status", "PatNum", "LName", "FName", "Preferred", "ProvNum", "Provider", "ProvHyg", "Hygienist", "OpNum", "OpName", "IsHygiene", "IsNewPatient", "Confirmed", "Procedures", "ScheduledFee"],
+    sql: (p) => `SELECT a.AptNum, a.AptDateTime, LENGTH(a.Pattern) * 5 AS Minutes, a.AptStatus, a.PatNum, p.LName, p.FName, p.Preferred,
+  a.ProvNum, pr.Abbr AS Provider, a.ProvHyg, ph.Abbr AS Hygienist, a.Op AS OpNum, o.OpName, a.IsHygiene, a.IsNewPatient,
+  IFNULL(dc.ItemName, '') AS Confirmed,
+  (SELECT GROUP_CONCAT(CONCAT(pc.ProcCode, IF(pl.ToothNum <> '', CONCAT(' #', pl.ToothNum), ''), IF(pl.Surf <> '', CONCAT(' ', pl.Surf), '')) ORDER BY pl.ProcNum SEPARATOR ', ')
+    FROM procedurelog pl JOIN procedurecode pc ON pc.CodeNum = pl.CodeNum WHERE pl.AptNum = a.AptNum AND pl.ProcStatus IN (1, 2)) AS Procedures,
+  (SELECT ROUND(IFNULL(SUM(${PROD}), 0), 2) FROM procedurelog pl WHERE pl.AptNum = a.AptNum AND pl.ProcStatus IN (1, 2)) AS ScheduledFee
+FROM appointment a
+JOIN patient p ON p.PatNum = a.PatNum
+LEFT JOIN provider pr ON pr.ProvNum = a.ProvNum
+LEFT JOIN provider ph ON ph.ProvNum = a.ProvHyg
+LEFT JOIN operatory o ON o.OperatoryNum = a.Op
+LEFT JOIN definition dc ON dc.DefNum = a.Confirmed
+WHERE a.AptDateTime >= ${p.date} AND a.AptDateTime < DATE_ADD(${p.date}, INTERVAL 1 DAY)
+  AND a.AptStatus IN (${p.include_broken === "true" ? "1, 2, 5" : "1, 2"})${and(p.provider && `(a.ProvNum = ${p.provider} OR a.ProvHyg = ${p.provider})`)}${and(p.op && `a.Op = ${p.op}`)}
+ORDER BY a.AptDateTime, o.ItemOrder, a.AptNum`,
+    post: (rows) =>
+      rows.map(({ AptStatus, ...r }) => ({
+        ...r,
+        AptDateTime: String(r.AptDateTime).replace("T", " ").slice(0, 19),
+        Time: String(r.AptDateTime).replace("T", " ").slice(11, 16),
+        Minutes: Number(r.Minutes || 0),
+        Status: APT_STATUS[Number(AptStatus)] || String(AptStatus),
+        IsHygiene: truthy(r.IsHygiene),
+        IsNewPatient: truthy(r.IsNewPatient),
+        Procedures: r.Procedures || "",
+        ScheduledFee: Number(r.ScheduledFee || 0),
+      })),
+  },
+
+  unsigned_notes: {
+    category: "patients",
+    description:
+      "Completed procedures and group notes whose latest procedure note is not signed, in the last 'days' days (or from/to). count_only=true gives just the number.",
+    params: {
+      from: { type: "date" },
+      to: { type: "date" },
+      days: { type: "int", default: 90 },
+      provider: { type: "id" },
+      count_only: { type: enumType("true", "false"), default: "false" },
+      limit: { type: "int", default: 500 },
+    },
+    columns: ["ProcNum", "PatNum", "LName", "FName", "ProcDate", "ProcCode", "Descript", "ProvNum", "Provider", "NoteEntered"],
+    sql: (p) => {
+      const range = p.from
+        ? `pl.ProcDate BETWEEN ${p.from} AND ${p.to || "CURDATE()"}`
+        : `pl.ProcDate >= DATE_SUB(CURDATE(), INTERVAL ${Math.min(Math.max(Number(p.days), 1), 3650)} DAY)${p.to ? ` AND pl.ProcDate <= ${p.to}` : ""}`;
+      const from = `FROM procedurelog pl
+JOIN procnote pn ON pn.ProcNoteNum = (SELECT MAX(pn2.ProcNoteNum) FROM procnote pn2 WHERE pn2.ProcNum = pl.ProcNum)
+JOIN patient p ON p.PatNum = pl.PatNum
+JOIN procedurecode pc ON pc.CodeNum = pl.CodeNum
+LEFT JOIN provider pr ON pr.ProvNum = pl.ProvNum
+WHERE pl.ProcStatus IN (2, 3) AND pn.Signature = '' AND pn.Note <> '' AND ${range}${and(p.provider && `pl.ProvNum = ${p.provider}`)}`;
+      return p.count_only === "true"
+        ? `SELECT COUNT(*) AS UnsignedNotes ${from}`
+        : `SELECT pl.ProcNum, pl.PatNum, p.LName, p.FName, pl.ProcDate, pc.ProcCode, pc.Descript, pl.ProvNum, pr.Abbr AS Provider, pn.EntryDateTime AS NoteEntered
+${from}
+ORDER BY pl.ProcDate, pl.ProcNum LIMIT ${cap(p.limit)}`;
+    },
+    post: (rows, p) =>
+      p.count_only === "true"
+        ? rows.map((r) => ({ UnsignedNotes: Number(r.UnsignedNotes || 0) }))
+        : rows.map((r) => ({ ...r, ProcDate: dateOnly(r.ProcDate), NoteEntered: String(r.NoteEntered || "").replace("T", " ").slice(0, 19) })),
+  },
+
   operatories: {
     category: "schedule",
     description: "Operatories (chairs) with assigned providers.",
@@ -365,22 +700,33 @@ FROM operatory ORDER BY ItemOrder`,
   },
 };
 
-/** Validate params and return the SQL for a named report. */
-function buildReport(name, input = {}) {
-  const def = Object.prototype.hasOwnProperty.call(REPORTS, name) ? REPORTS[name] : null;
+function reportDef(name) {
+  const def = typeof name === "string" && Object.prototype.hasOwnProperty.call(REPORTS, name) ? REPORTS[name] : null;
   if (!def) throw new ODError(`Unknown report "${name}". Available: ${Object.keys(REPORTS).join(", ")}`, { code: "not_found" });
+  return def;
+}
+
+/**
+ * Validate a report's parameters. Returns { def, values, raw }: `values` are SQL-safe
+ * fragments for def.sql(); `raw` are the same values as plain data (numbers, dates,
+ * lists) for def.post() and the demo gateway's fake engine. partial: only check the
+ * parameters given (for config defaults).
+ */
+function parseReportParams(name, input = {}, { partial = false } = {}) {
+  const def = reportDef(name);
   if (input === null || typeof input !== "object" || Array.isArray(input)) {
     throw new ODError("Report parameters must be an object.", { code: "bad_input" });
   }
   for (const k of Object.keys(input)) {
-    if (!def.params[k]) throw new ODError(`Report "${name}" has no parameter "${k}".`, { code: "bad_input" });
+    if (!Object.prototype.hasOwnProperty.call(def.params, k)) throw new ODError(`Report "${name}" has no parameter "${k}".`, { code: "bad_input" });
   }
   const values = {};
+  const raw = {};
   for (const [k, spec] of Object.entries(def.params)) {
     let v = input[k];
     if (v === undefined || v === null || v === "") v = spec.default;
     if (v === undefined) {
-      if (spec.required) throw new ODError(`Report "${name}" needs "${k}" (${typeOf(spec).describe}).`, { code: "bad_input" });
+      if (spec.required && !partial) throw new ODError(`Report "${name}" needs "${k}" (${typeOf(spec).describe}).`, { code: "bad_input" });
       continue;
     }
     try {
@@ -388,11 +734,49 @@ function buildReport(name, input = {}) {
     } catch (e) {
       throw new ODError(`Report "${name}" parameter "${k}" ${e.message}.`, { code: "bad_input" });
     }
+    raw[k] = rawValue(typeOf(spec), values[k]);
   }
   if (values.from && values.to && values.from > values.to) {
     throw new ODError(`Report "${name}": "from" is after "to".`, { code: "bad_input" });
   }
+  if (def.check && !partial) {
+    try {
+      def.check(raw);
+    } catch (e) {
+      throw new ODError(`Report "${name}" ${e.message}.`, { code: "bad_input" });
+    }
+  }
+  return { def, values, raw };
+}
+
+/** The plain value behind a parsed SQL fragment. */
+function rawValue(type, sql) {
+  if (type === TYPES.date) return sql.slice(1, -1);
+  if (type === TYPES.id || type === TYPES.int || type === TYPES.money) return Number(sql);
+  if (type === TYPES.codes) return sql.split(",").map((c) => c.slice(1, -1));
+  if (type === TYPES.ids) return sql.split(",").map(Number);
+  return sql;
+}
+
+/** Validate params and return the SQL for a named report. */
+function buildReport(name, input = {}) {
+  const { def, values } = parseReportParams(name, input);
   return def.sql(values);
+}
+
+/**
+ * Run a named report on any client and return { rows, truncated }:
+ *  - gateway client (TDC Office modules): POST /v1/reports/<name> on the gateway
+ *  - demo client (fake data): the fake engine's rows, then the same post step
+ *  - direct client: the SQL through Open Dental's ShortQuery, then the post step
+ */
+async function runReport(od, name, input = {}, { limit } = {}) {
+  if (od && typeof od.runReport === "function") return od.runReport(name, input, { limit });
+  const { def, values, raw } = parseReportParams(name, input);
+  const result =
+    od && typeof od.fakeReportRows === "function" ? await od.fakeReportRows(name, raw, { limit }) : await od.shortQuery(def.sql(values), { limit });
+  const rows = def.post ? def.post(result.rows, raw) : result.rows;
+  return { rows, truncated: !!result.truncated };
 }
 
 function typeOf(spec) {
@@ -405,6 +789,7 @@ function describeReports() {
     name,
     category: def.category,
     description: def.description,
+    ...(def.columns ? { columns: def.columns } : {}),
     params: Object.fromEntries(
       Object.entries(def.params).map(([k, s]) => [
         k,
@@ -414,4 +799,17 @@ function describeReports() {
   }));
 }
 
-module.exports = { REPORTS, buildReport, describeReports };
+module.exports = {
+  REPORTS,
+  buildReport,
+  parseReportParams,
+  runReport,
+  describeReports,
+  DEFAULT_HYGIENE_CODES,
+  XRAY_CATEGORIES,
+  APT_STATUS,
+  dateOnly,
+  xrayRow,
+  benefitYearStart,
+  addMonths,
+};

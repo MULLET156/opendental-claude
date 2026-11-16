@@ -5,7 +5,7 @@
  */
 
 const { ODError, redact, checkDate, checkDateTime, checkPattern, recordId } = require("./odclient");
-const { buildReport, describeReports } = require("./reports");
+const { runReport, describeReports } = require("./reports");
 
 const READ = { readOnlyHint: true, openWorldHint: true };
 const WRITE = { readOnlyHint: false, destructiveHint: false, openWorldHint: true };
@@ -299,7 +299,7 @@ function buildTools(od, { allowWrites = false, allowChartChanges = false } = {})
       description:
         "Run a built-in report by name with its parameters, e.g. {name:'production_by_provider', params:{from:'2026-11-01', to:'2026-11-30'}}. Call od_list_reports to see names and parameters.",
       inputSchema: obj({ name: str("Report name."), params: { type: "object", description: "Report parameters." } }, ["name"]),
-      run: async (a) => outPage(await od.shortQuery(buildReport(a.name, a.params || {}))),
+      run: async (a) => outPage(await runReport(od, a.name, a.params || {})),
     },
     {
       name: "od_run_query",

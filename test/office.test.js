@@ -210,9 +210,15 @@ test("no_future_appointment, insurance_remaining, daysheet, unsigned_notes behav
   assert.ok(before.length && before.every((r) => r.LastVisit < "2026-01-01"));
 
   const ins = (await dev.runReport("insurance_remaining", {})).rows;
-  assert.ok(ins.every((r) => r.IsEstimate === true && r.Remaining === Math.max(0, Math.round((r.AnnualMax - r.Used) * 100) / 100)));
+  assert.ok(ins.every((r) => r.IsEstimate === true && r.Remaining >= 0));
   assert.ok(ins.some((r) => r.Remaining === 0), "someone has used their whole maximum");
-  assert.ok(ins.some((r) => r.BenefitYearStart.endsWith("-07-01")), "a July benefit year");
+  // Behind the trimmed columns: remaining = annual max - used in that plan's benefit year.
+  const raw = fakeReportRows(demo.office(), "insurance_remaining", { limit: 2000 }).rows;
+  assert.ok(raw.some((r) => r.BenefitYearStart.endsWith("-07-01")), "a July benefit year");
+  for (const r of ins) {
+    const x = raw.find((y) => y.PatNum === r.PatNum);
+    assert.equal(r.Remaining, Math.max(0, Math.round((x.AnnualMax - x.Used) * 100) / 100));
+  }
   const rich = (await dev.runReport("insurance_remaining", { min_remaining: 1500 })).rows;
   assert.ok(rich.every((r) => r.Remaining >= 1500));
 
@@ -222,6 +228,9 @@ test("no_future_appointment, insurance_remaining, daysheet, unsigned_notes behav
   const withBroken = (await dev.runReport("daysheet", { date: TODAY, include_broken: "true" })).rows;
   assert.equal(withBroken.length, day.length + 1);
   assert.ok(day.some((r) => r.Hygienist) && day.some((r) => r.Procedures.includes("#")));
+  // Unscheduled page: each patient's oldest plan date.
+  const un = (await dev.runReport("unscheduled_treatment", {})).rows;
+  for (const r of un) assert.equal(r.PatientOldestDateTP, un.filter((x) => x.PatNum === r.PatNum).map((x) => x.DateTP).sort()[0]);
 
   const list = (await dev.runReport("unsigned_notes", {})).rows;
   const count = (await dev.runReport("unsigned_notes", { count_only: "true" })).rows;
@@ -314,7 +323,8 @@ test("direct mode runs the same post step on Open Dental's rows", async () => {
   const sqlRows = [{ PatNum: 1, LName: "A", FName: "B", Carrier: "C", GroupName: "G", BenefitYearStart: "2026-01-01", AnnualMax: "1000.00", Used: "250.5", AsOf: "2026-11-16" }];
   const od = { shortQuery: async (sql) => (assert.match(sql, /FROM patplan pp/), { rows: sqlRows, truncated: false }) };
   const { rows } = await runReport(od, "insurance_remaining", {});
-  assert.deepEqual(rows[0], { ...sqlRows[0], AnnualMax: 1000, Used: 250.5, Remaining: 749.5, IsEstimate: true });
+  // The post step works out Remaining; only the page's columns come back.
+  assert.deepEqual(rows[0], { PatNum: 1, LName: "A", FName: "B", Carrier: "C", Remaining: 749.5, IsEstimate: true, AsOf: "2026-11-16" });
 });
 
 // ------------------------------------------------------------------ demo safety and fake data

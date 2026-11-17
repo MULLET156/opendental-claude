@@ -62,7 +62,7 @@ test("connector: handshake, tool list, reads, guards", async () => {
     assert.equal(r[0].result.serverInfo.name, "opendental");
     const tools = r[1].result.tools;
     assert.equal(tools.length, 48);
-    assert.equal(tools.filter((t) => t.annotations.readOnlyHint === false).length, 22);
+    assert.equal(tools.filter((t) => t.annotations.readOnlyHint === false).length, 24);
     assert.equal(text(r[2]).results.writes_enabled, false);
     const s = text(r[3]);
     assert.equal(s.count, 120);

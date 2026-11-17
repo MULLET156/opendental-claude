@@ -4,7 +4,7 @@ This is how the TDC Office modules (Daysheet, Treatment Finder, Voice Charting, 
 
 ```
  building (laptop)        module ──► demo gateway ──► fake office              /health "stage":"design", "fake":true
- design stage (Hostinger) module ──► Tailscale Funnel ──► gateway on TrueNAS ──► OD demo database   "stage":"design", "fake":false
+ design stage (Hostinger) module ──► Cloudflare Tunnel ──► gateway on TrueNAS ──► OD demo database  "stage":"design", "fake":false
  live stage (office)      module ──► office gateway ──► real Open Dental        "stage":"live",   "fake":false
 ```
 

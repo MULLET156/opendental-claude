@@ -9,6 +9,8 @@
   - `xray_history`: CountLast12Months, Carrier, and the PA category (the Daysheet shows BWX, FMX and Pano)
   - `insurance_remaining`: GroupName, BenefitYearStart, AnnualMax, Used (Remaining is still worked out from them)
   - `unsigned_notes`: Descript, ProvNum, NoteEntered
+- **TrueNAS gateway now uses a Cloudflare Tunnel instead of Tailscale Funnel** (issue #6, Ryan's choice). `docs/truenas.md` covers moving toledodentalcare.com's DNS from GoDaddy to Cloudflare without breaking the website or email, creating the tunnel, and its address (`https://od-gateway.toledodentalcare.com`). `gateway/truenas/compose.yaml` adds a `cloudflared` service; its token goes in TrueNAS, never in GitHub.
+- Behind a trusted local proxy, the gateway reads Cloudflare's `CF-Connecting-IP` for the visitor's address (for the wrong-key lockout), then `X-Forwarded-For`.
 - `runReport()` returns exactly a report's declared columns, so nothing extra leaves the gateway even when the SQL reads more.
 
 ## 0.11.1 — 2026-11-16

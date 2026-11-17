@@ -28,7 +28,7 @@ All three share one core (`core/`), so the safety rules are the same everywhere.
 - With schedule changes allowed: "Move Mrs. Patel's Thursday cleaning to 2:00 in Op 2 and log that she called."
 - "What's at the lab? Anything due back after its seat appointment?" / "Which lab has been slowest this year?"
 - With schedule changes allowed: "Send Mrs. Lee's crown to Smile Lab, due before her seat on the 20th." / "Mark the old lab cases from completed appointments as received."
-- With chart changes allowed: "Write today's group note for Jane Smith: MO composite #3, 1 carp 2% lido 1:100k, tolerated well." / "Treatment plan a crown on 30 and an MOD composite on 3, phase 1, urgent." / "Put the implant on 19 in a separate plan called Option A." / "Complete the crown on 30." / "Chart an existing PFM on 19 from another dentist." / "Mark 1, 16, 17 and 32 missing." / "K has exfoliated; change it to permanent."
+- With chart changes allowed: "Write today's group note for Jane Smith: MO composite #3, 1 carp 2% lido 1:100k, tolerated well." / "Treatment plan a crown on 30 and an MOD composite on 3, phase 1, urgent." / "Put the implant on 19 in a separate plan called Option A." / "Complete the crown on 30." / "Chart an existing PFM on 19 from another dentist." / "Mark 1, 16, 17 and 32 missing." / "K has exfoliated; change it to permanent." / "Add to her treatment notes: wants to wait until January."
 
 ## Which Open Dental API plan do I need?
 
@@ -41,7 +41,7 @@ Open Dental sells API access in permission tiers, per location ([pricing and per
 | Confirm or break appointments, add appointment notes, log calls (commlogs), recall status | Comm | $15/mo |
 | Upload documents/images; simple insurance updates; setup tables | Documents, InsuranceSimple, Setup | $15/mo |
 | Book or move appointments | Appointments | $30/mo |
-| Write chart notes (group notes, addenda); enter treatment plans; complete procedures; chart existing work, referrals and conditions | ProcedureLogs and the general write permission (AllOthers) | $30/mo |
+| Write chart notes (group notes, addenda, the Treatment Notes box); enter treatment plans; complete procedures; chart existing work, referrals and conditions | ProcedureLogs and the general write permission (AllOthers) | $30/mo |
 | Mark teeth missing, hidden, primary or permanent | General write permission (AllOthers) | $30/mo |
 | Create and update lab cases (sent, received, checked) | General write permission (AllOthers) | $30/mo |
 | Add or edit patients; post procedures; claims and insurance plans | Patients, ProcedureLogs, Insurance | $30/mo |
@@ -172,7 +172,7 @@ curl -H "Authorization: Bearer odg_..." \
 ## Safety design
 
 - **Read-only unless you say otherwise.** Claude's change tools refuse to run until "Allow schedule changes" or "Allow chart changes" is on, and they're marked so Claude asks before each one. Gateway apps can only call the Open Dental paths and methods listed for them.
-- **Clinical records stay the dentist's.** Claude never signs notes or plans; it writes unsigned group notes and addenda (never overwriting earlier text, and Open Dental keeps every version), records only the treatment the dentist decides, and never changes or removes completed procedures (they carry billing history). Completing a procedure posts its fee, and Claude says so before asking for your yes. Group notes and plan changes are checked against the named patient before anything is written.
+- **Clinical records stay the dentist's.** Claude never signs notes or plans; it writes unsigned group notes and addenda (never overwriting earlier text, and Open Dental keeps every version). In the Chart's Treatment Notes box it adds lines; it rewrites the box only when you ask, only if nobody changed it since Claude read it, and it hands back the old text, records only the treatment the dentist decides, and never changes or removes completed procedures (they carry billing history). Completing a procedure posts its fee, and Claude says so before asking for your yes. Group notes and plan changes are checked against the named patient before anything is written.
 - **No free-form SQL by default.** Reports are a fixed catalog with type-checked parameters. Custom SQL (Claude's `od_run_query`, or gateway apps with `rawSql`) must pass a read-only check, and Open Dental's own query endpoint also screens and audit-logs it.
 - **SSNs never leave the connector or gateway**; they're removed at every depth. Gateway apps can remove more fields (emails, phones, addresses).
 - **Keys stay put.** Open Dental keys live in your keychain (connector) or server environment (gateway), are only ever sent to the configured Open Dental URL, and redirects are never followed. Gateway app keys are stored only as hashes.

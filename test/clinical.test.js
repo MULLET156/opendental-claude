@@ -20,12 +20,14 @@ test("clinical tools: names and change markings", async (t) => {
   const changes = Object.values(tools).filter((x) => !x.annotations.readOnlyHint).map((x) => x.name).sort();
   assert.deepEqual(changes, [
     "od_add_group_note",
+    "od_add_to_treatment_note",
     "od_add_to_treatment_plan",
     "od_append_procedure_note",
     "od_chart_procedure",
     "od_create_treatment_plan",
     "od_plan_procedure",
     "od_remove_planned_procedure",
+    "od_replace_treatment_note",
     "od_set_procedure_status",
     "od_set_tooth_status",
     "od_set_treatment_plan_priorities",
@@ -68,6 +70,8 @@ test("every chart change is refused while chart changes are off", async (t) => {
     ["od_chart_procedure", { pat_num: 1, proc_code: "D2750", status: "existing_other_provider", tooth: "19" }],
     ["od_set_procedure_status", { pat_num: 1, proc_num: 103, status: "complete" }],
     ["od_set_tooth_status", { pat_num: 1, teeth: ["32"], status: "missing" }],
+    ["od_add_to_treatment_note", { pat_num: 1, text: "x" }],
+    ["od_replace_treatment_note", { pat_num: 1, current_text: "", new_text: "x" }],
     ["od_set_treatment_plan_priorities", { pat_num: 1, treat_plan_num: 9, items: [{ proc_nums: [103], priority: "1" }] }],
   ];
   for (const [name, args] of calls) await assert.rejects(run(name, args), /Chart changes are turned off/, name);
@@ -319,4 +323,53 @@ test("tooth chart: read and mark missing, hidden, primary, permanent (read back)
   assert.equal(r.results[0].result, "already not missing");
   assert.equal(writes().length, n);
   assert.ok(od.state.toothinitials.some((x) => x.PatNum === 2 && x.ToothNum === "17"));
+});
+
+test("Treatment Notes box: read, add a line (keeps the rest), replace only from the text read", async (t) => {
+  const { run, od, writes } = await setup(t);
+  let r = await run("od_get_treatment_note", { pat_num: 1 });
+  assert.equal(r.results.treatment_note, "Prefers morning appointments.");
+
+  // Add keeps what was there, on a new line, and reads it back.
+  r = await run("od_add_to_treatment_note", { pat_num: 1, text: "  Wants #30 crown before March.  " });
+  assert.equal(r.results.treatment_note, "Prefers morning appointments.\r\nWants #30 crown before March.");
+  assert.equal(r.verified, "Read back from Open Dental after saving.");
+  const put = writes().at(-1);
+  assert.equal(put.method, "PUT");
+  assert.match(put.path, /\/patientnotes\/1$/);
+  assert.deepEqual(Object.keys(put.body), ["Treatment"]);
+
+  r = await run("od_add_to_treatment_note", { pat_num: 1, text: "Call after insurance resets.", date_stamp: true });
+  assert.match(r.results.added, /^\d{4}-\d{2}-\d{2}: Call after insurance resets\.$/);
+
+  // An empty box gets just the line.
+  r = await run("od_add_to_treatment_note", { pat_num: 2, text: "First note." });
+  assert.equal(r.results.treatment_note, "First note.");
+
+  // Replace needs the current text; a stale copy changes nothing.
+  const n = writes().length;
+  await assert.rejects(run("od_replace_treatment_note", { pat_num: 1, current_text: "Prefers morning appointments.", new_text: "New" }), /has changed since it was read/);
+  assert.equal(writes().length, n);
+  const current = (await run("od_get_treatment_note", { pat_num: 1 })).results.treatment_note;
+  r = await run("od_replace_treatment_note", { pat_num: 1, current_text: current.replace(/\r\n/g, "\n"), new_text: "Prefers mornings.\nCrown #30 before March." });
+  assert.equal(r.results.previous_text, current);
+  assert.equal(r.results.treatment_note, "Prefers mornings.\r\nCrown #30 before March.");
+  assert.match(r.undo, /previous_text/);
+  // Clearing is allowed.
+  r = await run("od_replace_treatment_note", { pat_num: 2, current_text: "First note.", new_text: "" });
+  assert.equal(r.results.treatment_note, "");
+
+  // Bad input, missing patients and old Open Dental versions change nothing.
+  const m = writes().length;
+  await assert.rejects(run("od_add_to_treatment_note", { pat_num: 1, text: "   " }), /text is required/);
+  await assert.rejects(run("od_add_to_treatment_note", { pat_num: 1, text: "x".repeat(4001) }), /too long/);
+  await assert.rejects(run("od_add_to_treatment_note", { pat_num: 999, text: "x" }), /no patient note record/);
+  await assert.rejects(run("od_add_to_treatment_note", { pat_num: 5, text: "x" }), /25\.2\.14/);
+  await assert.rejects(run("od_replace_treatment_note", { pat_num: 1, new_text: "x" }), /current_text is required/);
+  await assert.rejects(run("od_add_to_treatment_note", { pat_num: "1; DROP", text: "x" }));
+  assert.equal(writes().length, m);
+
+  // A write Open Dental ignores is reported as not made.
+  od.state.ignoreNotePut = true;
+  await assert.rejects(run("od_add_to_treatment_note", { pat_num: 1, text: "Lost" }), /NOT made/);
 });

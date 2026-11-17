@@ -274,6 +274,19 @@ function createFakeApi(office) {
       return ok(t);
     }
 
+    // ---- patient notes (the Chart's Treatment Notes box)
+    if ((m = p.match(/^\/patientnotes\/(\d+)$/))) {
+      const pat = Number(m[1]);
+      if (!o.patient.some((x) => x.PatNum === pat)) return notFound("PatientNote");
+      const pn = (o.patientnote[pat] = o.patientnote[pat] || { PatNum: pat, FamFinancial: "", Medical: "", Service: "", MedicalComp: "", Treatment: "", ICEName: "", ICEPhone: "", SecDateTEntry: "", SecDateTEdit: "" });
+      if (M === "GET") return ok(pn);
+      if (M === "PUT") {
+        for (const k of ["Treatment", "Medical", "Service", "MedicalComp", "ICEName", "ICEPhone"]) if (b[k] !== undefined) pn[k] = String(b[k]);
+        pn.SecDateTEdit = new Date().toISOString().slice(0, 19).replace("T", " ");
+        return ok(pn);
+      }
+    }
+
     // ---- tooth chart
     if (p === "/toothinitials" && M === "GET") return ok(o.toothinitial.filter((t) => !q.PatNum || String(t.PatNum) === q.PatNum));
     if (p === "/toothinitials" && M === "POST") {

@@ -7,8 +7,10 @@
  *
  * Safety rules built in:
  *  - Claude never signs anything. Notes are written unsigned; the dentist signs in Open Dental.
- *  - Notes are only ever added to (appended), never overwritten. Open Dental keeps
+ *  - Procedure notes are only ever added to (appended), never overwritten. Open Dental keeps
  *    every earlier version in the Chart's Audit tab.
+ *  - The Treatment Notes box is added to by default; replacing it needs the text Claude
+ *    read (so nothing written in between is lost) and returns the old text.
  *  - Group notes only cover completed procedures that belong to the named patient.
  *  - Only treatment-planned (TP) procedures can be changed or removed.
  *  - Treatment-plan changes are checked against the named patient.
@@ -246,6 +248,40 @@ function buildClinicalTools(od, { allowChartChanges = false } = {}) {
     return updated;
   }
 
+  // The Chart's "Treatment Notes" box is the patient note's Treatment field (Open Dental 25.2.14+).
+  // Open Dental's API only replaces it whole, so adding is done here: read, join, write, read back.
+  async function readTreatmentNote(patNum) {
+    let note;
+    try {
+      note = await od.request("GET", `/patientnotes/${patNum}`);
+    } catch (e) {
+      if (e && e.status === 404) throw new ODError(`Patient ${patNum} has no patient note record in Open Dental, or doesn't exist. Nothing was changed.`, { code: "not_found" });
+      throw e;
+    }
+    if (!note || typeof note !== "object" || Array.isArray(note)) throw new ODError(`Open Dental didn't return a patient note for patient ${patNum}.`, { code: "not_found" });
+    if (note.PatNum !== undefined && Number(note.PatNum) !== patNum) {
+      throw new ODError(`Open Dental returned the note of a different patient (${note.PatNum}). Nothing was changed.`, { code: "forbidden" });
+    }
+    if (!("Treatment" in note)) {
+      throw new ODError("This Open Dental version doesn't offer the Treatment Notes box through its API (it needs Open Dental 25.2.14 or newer). Nothing was changed.", { code: "not_supported" });
+    }
+    return { text: String(note.Treatment ?? ""), edited: note.SecDateTEdit || null };
+  }
+
+  async function patientName(patNum) {
+    const p = await od.request("GET", `/patients/${patNum}`);
+    return p && typeof p === "object" ? [p.FName, p.LName].filter(Boolean).join(" ") || null : null;
+  }
+
+  async function writeTreatmentNote(patNum, text) {
+    await od.request("PUT", `/patientnotes/${patNum}`, { body: { Treatment: text } });
+    const after = await readTreatmentNote(patNum);
+    if (after.text.replace(/\r\n/g, "\n") !== text.replace(/\r\n/g, "\n")) {
+      throw new ODError("After saving, Open Dental's Treatment Notes box doesn't show the new text. Treat this change as NOT made, and check the Chart in Open Dental.", { code: "not_applied" });
+    }
+    return after;
+  }
+
   async function getProc(procNum, patNum) {
     const p = await od.request("GET", `/procedurelogs/${procNum}`);
     if (!p || typeof p !== "object" || Array.isArray(p)) throw new ODError(`Procedure ${procNum} was not found.`, { code: "not_found" });
@@ -432,6 +468,81 @@ function buildClinicalTools(od, { allowChartChanges = false } = {}) {
         return out(
           await od.request("POST", "/procnotes", { body: { PatNum: patNum, ProcNum: procNum, Note: note, doAppendNote: "true", isSigned: "false" } }),
           { signed: false }
+        );
+      },
+    },
+
+    // -------------------------------------------------------------- treatment notes box
+    {
+      name: "od_get_treatment_note",
+      annotations: READ,
+      description:
+        "Read the Treatment Notes box in the patient's Chart (Open Dental's patient note 'Treatment' field, also called Odontogram Notes). Needs Open Dental 25.2.14 or newer.",
+      inputSchema: obj({ pat_num: int("PatNum") }, ["pat_num"]),
+      run: async (a) => {
+        const patNum = recordId("pat_num", a.pat_num);
+        const note = await readTreatmentNote(patNum);
+        return out({ pat_num: patNum, patient: await patientName(patNum), treatment_note: note.text, last_edited: note.edited });
+      },
+    },
+    {
+      name: "od_add_to_treatment_note",
+      annotations: WRITE,
+      description:
+        "CHART CHANGE. Add text to the end of the Treatment Notes box in the patient's Chart, on a new line. Everything already in the box is kept. Use for running reminders such as 'Wants to finish #30 crown before March'. Show the user the patient and the exact text and get a clear yes first.",
+      inputSchema: obj(
+        {
+          pat_num: int("PatNum"),
+          text: str("The text to add."),
+          date_stamp: bool("Start the line with today's date (e.g. '2026-11-17: '). Default false."),
+        },
+        ["pat_num", "text"]
+      ),
+      run: async (a) => {
+        needChart();
+        const patNum = recordId("pat_num", a.pat_num);
+        let line = checkText("text", a.text, 4000).trim();
+        if (a.date_stamp) line = `${today()}: ${line}`;
+        const before = await readTreatmentNote(patNum);
+        const joined = before.text.trim() ? `${before.text.replace(/\s+$/, "")}\r\n${line}` : line;
+        if (joined.length > 60000) throw new ODError("The Treatment Notes box would become too long. Nothing was changed.", { code: "bad_input" });
+        const after = await writeTreatmentNote(patNum, joined);
+        return out(
+          { pat_num: patNum, patient: await patientName(patNum), added: line, treatment_note: after.text },
+          { verified: "Read back from Open Dental after saving." }
+        );
+      },
+    },
+    {
+      name: "od_replace_treatment_note",
+      annotations: WRITE_DESTRUCTIVE,
+      description:
+        "CHART CHANGE. Replace everything in the Treatment Notes box in the patient's Chart (to correct or tidy it, or to clear it with an empty text). Read it first with od_get_treatment_note, show the user the old and the new text, and get a clear yes. Pass the text you read as current_text: if the box changed since, nothing is saved. The old text is returned so it can be put back. To just add a line, use od_add_to_treatment_note.",
+      inputSchema: obj(
+        {
+          pat_num: int("PatNum"),
+          current_text: str("The box's text exactly as od_get_treatment_note returned it (empty if it was empty)."),
+          new_text: str("The full new text for the box. Empty clears it."),
+        },
+        ["pat_num", "current_text", "new_text"]
+      ),
+      run: async (a) => {
+        needChart();
+        const patNum = recordId("pat_num", a.pat_num);
+        if (typeof a.current_text !== "string") throw new ODError("current_text is required (the text od_get_treatment_note returned).", { code: "bad_input" });
+        if (typeof a.new_text !== "string") throw new ODError("new_text is required (empty clears the box).", { code: "bad_input" });
+        if (a.new_text.length > 60000) throw new ODError("new_text is too long (over 60000 characters).", { code: "bad_input" });
+        const norm = (t) => t.replace(/\r\n/g, "\n").trim();
+        const before = await readTreatmentNote(patNum);
+        if (norm(before.text) !== norm(a.current_text)) {
+          throw new ODError("The Treatment Notes box has changed since it was read (or current_text doesn't match it). Nothing was changed; read it again with od_get_treatment_note.", { code: "conflict" });
+        }
+        const next = a.new_text.replace(/\r?\n/g, "\r\n");
+        if (norm(next) === norm(before.text)) return out({ pat_num: patNum, result: "unchanged", treatment_note: before.text });
+        const after = await writeTreatmentNote(patNum, next);
+        return out(
+          { pat_num: patNum, patient: await patientName(patNum), previous_text: before.text, treatment_note: after.text },
+          { verified: "Read back from Open Dental after saving.", undo: "To undo, replace it again with previous_text." }
         );
       },
     },

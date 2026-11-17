@@ -35,7 +35,7 @@ Note its path, for example `/mnt/tank/apps/opendental-gateway`. Below, `/mnt/POO
 Open **System → Shell** and run (one line, with your path):
 
 ```sh
-sudo docker run --rm --user 568:568 -v /mnt/POOL/apps/opendental-gateway:/config ghcr.io/mullet156/opendental-gateway:latest node gateway/cli.js init /config --stage design
+sudo docker run --rm --user 568:568 -v /mnt/POOL/apps/opendental-gateway:/config ghcr.io/mullet156/opendental-claude:latest node gateway/cli.js init /config --stage design
 ```
 
 This writes three files in the folder:
@@ -70,7 +70,7 @@ In TrueNAS: **Apps → Discover Apps → ⋮ (top right) → Install via YAML**.
 ```yaml
 services:
   opendental-gateway:
-    image: ghcr.io/mullet156/opendental-gateway:latest
+    image: ghcr.io/mullet156/opendental-claude:latest
     restart: unless-stopped
     network_mode: host
     user: "568:568"
@@ -143,7 +143,7 @@ You don't do anything. Once a day at 3 am (`UPDATE_HOUR`), the gateway checks Gi
 3. It switches over, and then confirms `/health` answers with the new version within a minute.
 4. If anything fails, it goes back to the version that was working and never tries that version again. The app log says what happened.
 
-To stay on one version, set `AUTO_UPDATE` to `"off"` in the app's YAML. To roll back by hand, set the image to a version, like `ghcr.io/mullet156/opendental-gateway:0.11.0`, with `AUTO_UPDATE: "off"`, and delete the `code` folder.
+To stay on one version, set `AUTO_UPDATE` to `"off"` in the app's YAML. To roll back by hand, set the image to a version, like `ghcr.io/mullet156/opendental-claude:0.11.0`, with `AUTO_UPDATE: "off"`, and delete the `code` folder.
 
 ## Turning it off later
 

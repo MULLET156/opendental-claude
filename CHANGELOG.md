@@ -1,8 +1,12 @@
 # Changelog
 
+## 0.11.1 — 2026-11-16
+
+- The gateway image is published as `ghcr.io/mullet156/opendental-claude` (named after the repository, so GitHub lets the release workflow publish it). The TrueNAS guide and compose file use the new name.
+
 ## 0.11.0 — 2026-11-16
 
-- **Gateway on TrueNAS SCALE, through Tailscale Funnel** (issue #6; guide: `docs/truenas.md`). New image `ghcr.io/mullet156/opendental-gateway` (published with each regular release) and a TrueNAS "Install via YAML" file (`gateway/truenas/compose.yaml`). It listens only on the NAS itself; the Tailscale app publishes it.
+- **Gateway on TrueNAS SCALE, through Tailscale Funnel** (issue #6; guide: `docs/truenas.md`). New image `ghcr.io/mullet156/opendental-claude` (published with each regular release) and a TrueNAS "Install via YAML" file (`gateway/truenas/compose.yaml`). It listens only on the NAS itself; the Tailscale app publishes it.
 - **Self-updating:** the image runs `gateway/runner.js`, which checks GitHub once a day for a newer regular release (never test builds), verifies it against the release's new `SHA256SUMS`, checks it accepts the config, switches, and confirms `/health` answers with the new version, or goes back to the working version and never retries that one. `AUTO_UPDATE=off` turns it off.
 - **`node gateway/cli.js init <folder> --stage design`** writes a design-stage config with a key and preset per TDC Office module, an `.env` to fill in, and a private `module-keys.txt`.
 - **Safer when reachable from the internet:** after 10 wrong app keys from one address in 10 minutes, that address waits 15 minutes. `trustProxy` can list the proxy addresses whose `X-Forwarded-For` is believed (e.g. `["127.0.0.1", "::1"]` for Tailscale on the same box).

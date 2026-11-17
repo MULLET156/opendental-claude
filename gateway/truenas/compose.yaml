@@ -3,7 +3,7 @@
 # See docs/truenas.md.
 services:
   opendental-gateway:
-    image: ghcr.io/mullet156/opendental-gateway:latest
+    image: ghcr.io/mullet156/opendental-claude:latest
     restart: unless-stopped
     # Host network: the gateway listens on 127.0.0.1:8787 of the NAS, where only the
     # Tailscale app (also on the host network) reaches it. Nothing else on the office

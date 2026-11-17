@@ -1,11 +1,11 @@
-# Open Dental app gateway (TrueNAS SCALE / Docker). Published as ghcr.io/mullet156/opendental-gateway.
+# Open Dental app gateway (TrueNAS SCALE / Docker). Published as ghcr.io/mullet156/opendental-claude.
 #
 # It runs gateway/runner.js, which starts the gateway with the settings in /config and,
 # once a day, installs newer regular releases from GitHub (checked, with automatic
 # rollback). Set AUTO_UPDATE=off to stay on the version in the image.
 #
-#   docker run --rm -v /srv/odgw:/config ghcr.io/mullet156/opendental-gateway node gateway/cli.js init /config --stage design
-#   docker run -d --name odgw --network host --restart unless-stopped -v /srv/odgw:/config ghcr.io/mullet156/opendental-gateway
+#   docker run --rm -v /srv/odgw:/config ghcr.io/mullet156/opendental-claude node gateway/cli.js init /config --stage design
+#   docker run -d --name odgw --network host --restart unless-stopped -v /srv/odgw:/config ghcr.io/mullet156/opendental-claude
 #
 # /config holds gateway.config.json, .env (Open Dental address and keys) and logs/.
 # See docs/truenas.md.

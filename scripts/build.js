@@ -181,6 +181,27 @@ function buildGatewayWindows() {
   return { data: zip(entries), names: entries.map((e) => e.name) };
 }
 
+/**
+ * Gateway download for Linux / TrueNAS / Docker, used by the self-updating runner:
+ * opendental-gateway-<version>.tar.gz with package.json, LICENSE, core/ and gateway/
+ * (no demo, no Windows setup). Reproducible: fixed times and order.
+ */
+function buildGatewayTar() {
+  const { tar } = require("../gateway/tar");
+  const zlib = require("node:zlib");
+  const entries = [
+    { name: "package.json", data: read("package.json") },
+    { name: "LICENSE", data: read("LICENSE") },
+    ...walk(path.join(ROOT, "core")).map((e) => ({ name: `core/${e.name}`, data: e.data })),
+    ...walk(path.join(ROOT, "gateway"))
+      .filter((e) => !/(^|\/)\.env$|^gateway\.config\.json$|^logs\/|^demo\/|^windows\//.test(e.name))
+      .map((e) => ({ name: `gateway/${e.name}`, data: e.data })),
+  ].sort((a, b) => a.name.localeCompare(b.name));
+  return { data: zlib.gzipSync(tar(entries), { level: 9 }), names: entries.map((e) => e.name) };
+}
+
+const gatewayTarName = () => `opendental-gateway-${JSON.parse(read("package.json")).version}.tar.gz`;
+
 if (require.main === module) {
   fs.mkdirSync(DIST, { recursive: true });
   const ext = buildExtension();
@@ -194,6 +215,16 @@ if (require.main === module) {
   console.log(`dist/opendental.mcpb    ${(ext.length / 1024).toFixed(1)} KB`);
   console.log(`dist/opendental.plugin  ${(plug.length / 1024).toFixed(1)} KB`);
   console.log(`dist/${winName}  ${(win.length / 1024).toFixed(1)} KB`);
+  const tgz = buildGatewayTar().data;
+  const tgzName = gatewayTarName();
+  for (const old of fs.readdirSync(DIST)) if (/^opendental-gateway-\d.*\.tar\.gz$/.test(old)) fs.rmSync(path.join(DIST, old));
+  fs.writeFileSync(path.join(DIST, tgzName), tgz);
+  console.log(`dist/${tgzName}  ${(tgz.length / 1024).toFixed(1)} KB`);
+  // Checksums of every download (the gateway's self-updater checks its download against this).
+  const crypto = require("node:crypto");
+  const assets = ["opendental.mcpb", "opendental.plugin", winName, tgzName];
+  fs.writeFileSync(path.join(DIST, "SHA256SUMS"), assets.map((n) => `${crypto.createHash("sha256").update(fs.readFileSync(path.join(DIST, n))).digest("hex")}  ${n}`).join("\n") + "\n");
+  console.log("dist/SHA256SUMS");
 }
 
-module.exports = { zip, crc32, buildExtension, buildPlugin, buildGatewayWindows, gatewayZipName };
+module.exports = { zip, crc32, buildExtension, buildPlugin, buildGatewayWindows, gatewayZipName, buildGatewayTar, gatewayTarName };

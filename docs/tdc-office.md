@@ -4,11 +4,11 @@ This is how the TDC Office modules (Daysheet, Treatment Finder, Voice Charting, 
 
 ```
  building (laptop)        module ──► demo gateway ──► fake office              /health "stage":"design", "fake":true
- design stage (Hostinger) module ──► tunnel ──► office gateway ──► OD demo database   "stage":"design", "fake":false
+ design stage (Hostinger) module ──► Tailscale Funnel ──► gateway on TrueNAS ──► OD demo database   "stage":"design", "fake":false
  live stage (office)      module ──► office gateway ──► real Open Dental        "stage":"live",   "fake":false
 ```
 
-The same module code runs everywhere. Only its settings change (`TDC_STAGE`, `GATEWAY_URL`, `GATEWAY_KEY`). A module checks that the gateway's `/health` `"stage"` matches `TDC_STAGE` (`checkStage()`, at startup and every 5 minutes) and stops serving patient pages if it doesn't. The office gateway's stage is set in its config (`"stage": "design"`, or `STAGE=design` in the Windows setup's `settings.txt`); unset means live.
+The same module code runs everywhere. Only its settings change (`TDC_STAGE`, `GATEWAY_URL`, `GATEWAY_KEY`). A module checks that the gateway's `/health` `"stage"` matches `TDC_STAGE` (`checkStage()`, at startup and every 5 minutes) and stops serving patient pages if it doesn't. The design-stage gateway runs on the office TrueNAS box ([truenas.md](truenas.md)). A gateway's stage is set in its config (`"stage": "design"`, or `STAGE=design` in the Windows setup's `settings.txt`); unset means live.
 
 ## The demo gateway (fake data)
 

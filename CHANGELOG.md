@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.11.0 — 2026-11-16
+
+- **Gateway on TrueNAS SCALE, through Tailscale Funnel** (issue #6; guide: `docs/truenas.md`). New image `ghcr.io/mullet156/opendental-gateway` (published with each regular release) and a TrueNAS "Install via YAML" file (`gateway/truenas/compose.yaml`). It listens only on the NAS itself; the Tailscale app publishes it.
+- **Self-updating:** the image runs `gateway/runner.js`, which checks GitHub once a day for a newer regular release (never test builds), verifies it against the release's new `SHA256SUMS`, checks it accepts the config, switches, and confirms `/health` answers with the new version, or goes back to the working version and never retries that one. `AUTO_UPDATE=off` turns it off.
+- **`node gateway/cli.js init <folder> --stage design`** writes a design-stage config with a key and preset per TDC Office module, an `.env` to fill in, and a private `module-keys.txt`.
+- **Safer when reachable from the internet:** after 10 wrong app keys from one address in 10 minutes, that address waits 15 minutes. `trustProxy` can list the proxy addresses whose `X-Forwarded-For` is believed (e.g. `["127.0.0.1", "::1"]` for Tailscale on the same box).
+- Releases also include `opendental-gateway-<version>.tar.gz` (Linux) and `SHA256SUMS`. CI builds the image and checks its `/health`.
+
 ## 0.10.0 — 2026-11-16
 
 - **Gateway stage** (CONTRACT.md §1, issue #6): `"stage": "design" | "live"` in the gateway config (Windows setup: `STAGE=` in `settings.txt`); unset means live, so a forgotten setting fails safe. `/health` reports `"stage"` (and still `"fake"`). The demo gateway says `"stage": "design"`. `checkStage()` now follows the stage: a design-stage module accepts the office gateway serving Open Dental's demo database, not only the fake demo.

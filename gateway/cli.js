@@ -9,6 +9,9 @@
  *   node gateway/cli.js hash <key>             print the hash of an existing key
  *   node gateway/cli.js check [config.json]    validate the config file
  *   node gateway/cli.js new-secret             create a LAB_SYNC_SECRET for the lab tracker sync
+ *   node gateway/cli.js init <folder> [--stage design|live] [--modules daysheet,finder,voice,numbers]
+ *                                              set up a gateway folder (TrueNAS/Docker): gateway.config.json with a
+ *                                              key per TDC Office module, an .env to fill in, and module-keys.txt
  *   node gateway/cli.js lab-sync [config.json] [--dry-run]
  *                                              run one lab tracker sync now (--dry-run: read Open Dental and
  *                                              show what would be sent, without sending or writing anything)
@@ -105,6 +108,80 @@ switch (cmd) {
       });
     break;
   }
+  case "init": {
+    const fs = require("node:fs");
+    const dir = path.resolve(arg && !arg.startsWith("--") ? arg : ".");
+    const opt = (n, d) => {
+      const i = process.argv.indexOf(`--${n}`);
+      return i > 0 ? process.argv[i + 1] : d;
+    };
+    const stage = opt("stage", "design");
+    const modules = String(opt("modules", "daysheet,finder,voice,numbers")).split(",").map((m) => m.trim()).filter(Boolean);
+    if (stage !== "design" && stage !== "live") {
+      console.error('--stage must be "design" or "live".');
+      process.exit(1);
+    }
+    for (const m of modules) {
+      if (!PRESETS[m] || m === "dev") {
+        console.error(`Unknown module "${m}". Use: ${Object.keys(PRESETS).filter((p) => p !== "dev").join(", ")}`);
+        process.exit(1);
+      }
+    }
+    const cfgFile = path.join(dir, "gateway.config.json");
+    if (fs.existsSync(cfgFile) && !process.argv.includes("--force")) {
+      console.error(`${cfgFile} already exists; not changing it. (Add --force to start over with new keys.)`);
+      process.exit(1);
+    }
+    fs.mkdirSync(path.join(dir, "logs"), { recursive: true });
+    const keys = {};
+    const apps = modules.map((m) => {
+      keys[m] = newKey();
+      return presetApp(m, m, hashKey(keys[m]));
+    });
+    const cfg = {
+      stage,
+      listen: { host: "127.0.0.1", port: 8787 },
+      trustProxy: ["127.0.0.1", "::1"],
+      auditLogDir: "logs",
+      apps,
+    };
+    fs.writeFileSync(cfgFile, JSON.stringify(cfg, null, 2) + "\n");
+    const envFile = path.join(dir, ".env");
+    if (!fs.existsSync(envFile)) {
+      fs.writeFileSync(
+        envFile,
+        [
+          "# Open Dental API Service this gateway uses. In the design stage: the DEMO database's API Service.",
+          "OD_BASE_URL=http://<open dental server address>:30223/api/v1",
+          "OD_DEVELOPER_KEY=",
+          "OD_CUSTOMER_KEY=",
+          "",
+        ].join("\n"),
+        { mode: 0o600 }
+      );
+    }
+    const keysFile = path.join(dir, "module-keys.txt");
+    fs.writeFileSync(
+      keysFile,
+      [
+        "TDC Office module keys for this gateway. Put each one in that module's Hostinger app as GATEWAY_KEY,",
+        "then DELETE THIS FILE. They can't be shown again (the gateway keeps only their hashes).",
+        "",
+        ...modules.map((m) => `${m.padEnd(9)} ${keys[m]}`),
+        "",
+      ].join("\n"),
+      { mode: 0o600 }
+    );
+    try {
+      fs.chmodSync(envFile, 0o600);
+      fs.chmodSync(keysFile, 0o600);
+    } catch {}
+    console.log(`Set up ${dir} (stage: ${stage}):
+  gateway.config.json  a key and the narrowest permissions for: ${modules.join(", ")}
+  .env                 fill in the Open Dental API address and keys
+  module-keys.txt      the module keys: copy each into its Hostinger app, then delete this file`);
+    break;
+  }
   default:
-    console.log('Usage:\n  node gateway/cli.js new-key "<app name>"\n  node gateway/cli.js hash <key>\n  node gateway/cli.js check [gateway.config.json]\n  node gateway/cli.js new-secret\n  node gateway/cli.js lab-sync [gateway.config.json] [--dry-run]');
+    console.log('Usage:\n  node gateway/cli.js new-key "<app name>"\n  node gateway/cli.js hash <key>\n  node gateway/cli.js check [gateway.config.json]\n  node gateway/cli.js new-secret\n  node gateway/cli.js init <folder> [--stage design|live] [--modules daysheet,finder,voice,numbers]\n  node gateway/cli.js lab-sync [gateway.config.json] [--dry-run]');
 }

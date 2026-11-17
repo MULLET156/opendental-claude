@@ -1,0 +1,18 @@
+# TrueNAS SCALE: Apps -> Discover Apps -> (⋮) Install via YAML, paste this, and change
+# the folder on the "volumes" line to the dataset you made for the gateway.
+# See docs/truenas.md.
+services:
+  opendental-gateway:
+    image: ghcr.io/mullet156/opendental-gateway:latest
+    restart: unless-stopped
+    # Host network: the gateway listens on 127.0.0.1:8787 of the NAS, where only the
+    # Tailscale app (also on the host network) reaches it. Nothing else on the office
+    # network can.
+    network_mode: host
+    user: "568:568" # TrueNAS's "apps" user; it must own the dataset below
+    environment:
+      TZ: America/Los_Angeles
+      AUTO_UPDATE: "on" # "off" stays on the version in the image
+      UPDATE_HOUR: "3" # checks GitHub for a new release at 3 am
+    volumes:
+      - /mnt/POOL/apps/opendental-gateway:/config

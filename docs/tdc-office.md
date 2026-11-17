@@ -132,12 +132,14 @@ Run with `POST /v1/reports/<name>` and a JSON body `{"params": {...}}` (or `GET`
 
 | Report | Parameters | Each row |
 |---|---|---|
-| `daysheet` | `date` (required), `provider`, `op`, `include_broken` | AptNum, AptDateTime, Time, Minutes, Status, PatNum, LName, FName, Preferred, ProvNum, Provider, ProvHyg, Hygienist, OpNum, OpName, IsHygiene, IsNewPatient, Confirmed, Procedures, ScheduledFee |
-| `unscheduled_treatment` | `provider`, `codes`, `min_fee`, `min_total`, `hygiene_codes`, `include_hygiene`, `patients`, `limit` | PatNum, LName, FName, ProcNum, ProcCode, Descript, ToothNum, Surf, Fee, ProvNum, Provider, DateTP, Priority, AptNum, PatientTotal, AsOf |
-| `no_future_appointment` | `last_visit_after`, `last_visit_before`, `provider`, `include_never_seen`, `limit` | PatNum, LName, FName, PriProv, Provider, LastVisit, PlannedTotal, AsOf |
-| `xray_history` | `patients` or `date` (one is required), `limit` | PatNum, LName, FName, Category (BWX, FMX, PANO, PA), LastDate, CountLast12Months, Carrier, Limit, NextCovered, CoveredNow, AsOf |
-| `insurance_remaining` | `patients`, `carrier`, `min_remaining`, `limit` | PatNum, LName, FName, Carrier, GroupName, BenefitYearStart, AnnualMax, Used, Remaining, IsEstimate (always true), AsOf |
-| `unsigned_notes` | `days` (default 90) or `from`/`to`, `provider`, `count_only`, `limit` | ProcNum, PatNum, LName, FName, ProcDate, ProcCode, Descript, ProvNum, Provider, NoteEntered (or one row `{UnsignedNotes}` with count_only) |
+| `daysheet` | `date` (required), `provider`, `op`, `include_broken` | AptNum, AptDateTime, Time, Minutes, Status, PatNum, LName, FName, Preferred, Provider, Hygienist, OpName, IsHygiene, IsNewPatient, Confirmed, Procedures |
+| `unscheduled_treatment` | `provider`, `codes`, `min_fee`, `min_total`, `hygiene_codes`, `include_hygiene`, `patients`, `limit` | PatNum, LName, FName, ProcNum, ProcCode, Descript, ToothNum, Surf, Fee, DateTP, Priority, PatientTotal, PatientOldestDateTP, AsOf |
+| `no_future_appointment` | `last_visit_after`, `last_visit_before`, `provider`, `hygiene_codes`, `include_never_seen`, `limit` | PatNum, LName, FName, LastVisit, PlannedTotal, AsOf |
+| `xray_history` | `patients` or `date` (one is required), `limit` | PatNum, LName, FName, Category (BWX, FMX, PANO), LastDate, Limit, NextCovered, CoveredNow, AsOf |
+| `insurance_remaining` | `patients`, `carrier`, `min_remaining`, `limit` | PatNum, LName, FName, Carrier, Remaining, IsEstimate (always true), AsOf |
+| `unsigned_notes` | `days` (default 90) or `from`/`to`, `provider`, `count_only`, `limit` | ProcNum, PatNum, LName, FName, ProcDate, ProcCode, Provider (or one row `{UnsignedNotes}` with count_only) |
+
+Each report returns only the columns its planned pages show (SITE-OUTLINE.md), and never SSN, birthdate, address or phone. The Treatment Finder gets a phone number from the patient lookup, only after a tap.
 
 Notes:
 - **Hygiene** is left out of `unscheduled_treatment`, and out of `no_future_appointment`'s planned total. Ryan's list (2026-11-16): D0120, D0140, D0150, D0210, D0272, D0274, D1110, D1120, D1206, D1208, D4341, D4342, D4346, D4355, D4910. To change it for every report at once, set `hygieneCodes` in the gateway config:

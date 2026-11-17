@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.12.0 — 2026-11-16
+
+- **Reports return only what the pages show** (issue #6, item 5; SITE-OUTLINE.md). Removed columns, for module agents:
+  - `daysheet`: ProvNum, ProvHyg, OpNum, ScheduledFee
+  - `unscheduled_treatment`: ProvNum, Provider, AptNum; **added** `PatientOldestDateTP` (the Unscheduled page's oldest plan date)
+  - `no_future_appointment`: PriProv, Provider
+  - `xray_history`: CountLast12Months, Carrier, and the PA category (the Daysheet shows BWX, FMX and Pano)
+  - `insurance_remaining`: GroupName, BenefitYearStart, AnnualMax, Used (Remaining is still worked out from them)
+  - `unsigned_notes`: Descript, ProvNum, NoteEntered
+- `runReport()` returns exactly a report's declared columns, so nothing extra leaves the gateway even when the SQL reads more.
+
 ## 0.11.1 — 2026-11-16
 
 - The gateway image is published as `ghcr.io/mullet156/opendental-claude` (named after the repository, so GitHub lets the release workflow publish it). The TrueNAS guide and compose file use the new name.

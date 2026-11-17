@@ -118,7 +118,6 @@ const XRAY_CATEGORIES = {
   BWX: ["D0270", "D0272", "D0273", "D0274", "D0277"],
   FMX: ["D0210"],
   PANO: ["D0330"],
-  PA: ["D0220", "D0230"],
 };
 
 // Open Dental benefit enums (benefit.QuantityQualifier, benefit.TimePeriod).
@@ -492,7 +491,7 @@ ORDER BY lc.DateTimeCreated, lc.LabCaseNum LIMIT ${Math.min(Math.max(Number(p.li
       patients: { type: "ids" },
       limit: { type: "int", default: 2000 },
     },
-    columns: ["PatNum", "LName", "FName", "ProcNum", "ProcCode", "Descript", "ToothNum", "Surf", "Fee", "ProvNum", "Provider", "DateTP", "Priority", "AptNum", "PatientTotal", "AsOf"],
+    columns: ["PatNum", "LName", "FName", "ProcNum", "ProcCode", "Descript", "ToothNum", "Surf", "Fee", "DateTP", "Priority", "PatientTotal", "PatientOldestDateTP", "AsOf"],
     sql: (p) => `SELECT pl.PatNum, p.LName, p.FName, pl.ProcNum, pc.ProcCode, pc.Descript, pl.ToothNum, pl.Surf,
   ROUND(${PROD}, 2) AS Fee, pl.ProvNum, pr.Abbr AS Provider, pl.DateTP, IFNULL(d.ItemName, '') AS Priority, pl.AptNum, CURDATE() AS AsOf
 FROM procedurelog pl
@@ -505,9 +504,14 @@ WHERE pl.ProcStatus = 1 AND p.PatStatus = 0
 ORDER BY p.LName, p.FName, pl.PatNum, pl.DateTP, pl.ProcNum LIMIT ${cap(p.limit)}`,
     post(rows, p) {
       const totals = new Map();
-      for (const r of rows) totals.set(r.PatNum, round2((totals.get(r.PatNum) || 0) + Number(r.Fee || 0)));
+      const oldest = new Map();
+      for (const r of rows) {
+        totals.set(r.PatNum, round2((totals.get(r.PatNum) || 0) + Number(r.Fee || 0)));
+        const d = dateOnly(r.DateTP);
+        if (d && (!oldest.has(r.PatNum) || d < oldest.get(r.PatNum))) oldest.set(r.PatNum, d);
+      }
       return rows
-        .map((r) => ({ ...r, Fee: Number(r.Fee), DateTP: dateOnly(r.DateTP), AsOf: dateOnly(r.AsOf), PatientTotal: totals.get(r.PatNum) }))
+        .map((r) => ({ ...r, Fee: Number(r.Fee), DateTP: dateOnly(r.DateTP), AsOf: dateOnly(r.AsOf), PatientTotal: totals.get(r.PatNum), PatientOldestDateTP: oldest.get(r.PatNum) || null }))
         .filter((r) => p.min_total === undefined || r.PatientTotal >= p.min_total);
     },
   },
@@ -524,7 +528,7 @@ ORDER BY p.LName, p.FName, pl.PatNum, pl.DateTP, pl.ProcNum LIMIT ${cap(p.limit)
       include_never_seen: { type: enumType("true", "false"), default: "false" },
       limit: { type: "int", default: 2000 },
     },
-    columns: ["PatNum", "LName", "FName", "PriProv", "Provider", "LastVisit", "PlannedTotal", "AsOf"],
+    columns: ["PatNum", "LName", "FName", "LastVisit", "PlannedTotal", "AsOf"],
     sql: (p) => `SELECT p.PatNum, p.LName, p.FName, p.PriProv, pr.Abbr AS Provider,
   (SELECT DATE(MAX(a.AptDateTime)) FROM appointment a WHERE a.PatNum = p.PatNum AND a.AptStatus = 2) AS LastVisit,
   (SELECT ROUND(IFNULL(SUM(${PROD}), 0), 2) FROM procedurelog pl JOIN procedurecode pc ON pc.CodeNum = pl.CodeNum
@@ -542,9 +546,9 @@ ORDER BY LastVisit DESC, p.PatNum LIMIT ${cap(p.limit)}`,
   xray_history: {
     category: "patients",
     description:
-      "Last bitewing (BWX), full-mouth (FMX), panoramic (PANO) and periapical (PA) x-ray dates per patient, with the primary plan's frequency limit and the date it's next covered. Give patients (PatNums) or date (everyone on that day's schedule). Insurance limits come from the plan's benefit table; it is not a live eligibility check.",
+      "Last bitewing (BWX), full-mouth (FMX), and panoramic (PANO) x-ray dates per patient (what the Daysheet shows), with the primary plan's frequency limit and the date it's next covered. Give patients (PatNums) or date (everyone on that day's schedule). Insurance limits come from the plan's benefit table; it is not a live eligibility check.",
     params: { patients: { type: "ids" }, date: { type: "date" }, limit: { type: "int", default: 2000 } },
-    columns: ["PatNum", "LName", "FName", "Category", "LastDate", "CountLast12Months", "Carrier", "Limit", "NextCovered", "CoveredNow", "AsOf"],
+    columns: ["PatNum", "LName", "FName", "Category", "LastDate", "Limit", "NextCovered", "CoveredNow", "AsOf"],
     check(p) {
       if (!p.patients && !p.date) throw new Error('needs "patients" or "date"');
     },
@@ -582,7 +586,7 @@ LEFT JOIN carrier ca ON ca.CarrierNum = ip.CarrierNum`;
     description:
       "ESTIMATE of each patient's primary dental plan for the current benefit year: annual maximum, insurance used so far (paid plus pending estimates) and remaining. Based on what's recorded in Open Dental, not a live check with the insurer.",
     params: { patients: { type: "ids" }, carrier: { type: "id" }, min_remaining: { type: "money" }, limit: { type: "int", default: 2000 } },
-    columns: ["PatNum", "LName", "FName", "Carrier", "GroupName", "BenefitYearStart", "AnnualMax", "Used", "Remaining", "IsEstimate", "AsOf"],
+    columns: ["PatNum", "LName", "FName", "Carrier", "Remaining", "IsEstimate", "AsOf"],
     sql: (p) => `SELECT t.PatNum, t.LName, t.FName, t.Carrier, t.GroupName, t.BenefitYearStart, t.AnnualMax,
   (SELECT ROUND(IFNULL(SUM(CASE WHEN cp.Status = 0 THEN cp.InsPayEst ELSE cp.InsPayAmt END), 0), 2) FROM claimproc cp
     WHERE cp.PatNum = t.PatNum AND cp.InsSubNum = t.InsSubNum AND cp.Status IN (0, 1, 3, 4, 9)
@@ -628,7 +632,7 @@ ORDER BY t.LName, t.FName, t.PatNum LIMIT ${cap(p.limit)}`,
     description:
       "One day's appointments (scheduled and complete; broken too with include_broken=true) with patient, provider, hygienist, operatory, confirmation, length and procedures.",
     params: { date: { type: "date", required: true }, provider: { type: "id" }, op: { type: "id" }, include_broken: { type: enumType("true", "false"), default: "false" } },
-    columns: ["AptNum", "AptDateTime", "Time", "Minutes", "Status", "PatNum", "LName", "FName", "Preferred", "ProvNum", "Provider", "ProvHyg", "Hygienist", "OpNum", "OpName", "IsHygiene", "IsNewPatient", "Confirmed", "Procedures", "ScheduledFee"],
+    columns: ["AptNum", "AptDateTime", "Time", "Minutes", "Status", "PatNum", "LName", "FName", "Preferred", "Provider", "Hygienist", "OpName", "IsHygiene", "IsNewPatient", "Confirmed", "Procedures"],
     sql: (p) => `SELECT a.AptNum, a.AptDateTime, LENGTH(a.Pattern) * 5 AS Minutes, a.AptStatus, a.PatNum, p.LName, p.FName, p.Preferred,
   a.ProvNum, pr.Abbr AS Provider, a.ProvHyg, ph.Abbr AS Hygienist, a.Op AS OpNum, o.OpName, a.IsHygiene, a.IsNewPatient,
   IFNULL(dc.ItemName, '') AS Confirmed,
@@ -670,7 +674,8 @@ ORDER BY a.AptDateTime, o.ItemOrder, a.AptNum`,
       count_only: { type: enumType("true", "false"), default: "false" },
       limit: { type: "int", default: 500 },
     },
-    columns: ["ProcNum", "PatNum", "LName", "FName", "ProcDate", "ProcCode", "Descript", "ProvNum", "Provider", "NoteEntered"],
+    columns: ["ProcNum", "PatNum", "LName", "FName", "ProcDate", "ProcCode", "Provider"],
+    columnsFor: (p) => (p.count_only === "true" ? ["UnsignedNotes"] : null),
     sql: (p) => {
       const range = p.from
         ? `pl.ProcDate BETWEEN ${p.from} AND ${p.to || "CURDATE()"}`
@@ -777,7 +782,10 @@ async function runReport(od, name, input = {}, { limit } = {}) {
   const { def, values, raw } = parseReportParams(name, input);
   const result =
     od && typeof od.fakeReportRows === "function" ? await od.fakeReportRows(name, raw, { limit }) : await od.shortQuery(def.sql(values), { limit });
-  const rows = def.post ? def.post(result.rows, raw) : result.rows;
+  let rows = def.post ? def.post(result.rows, raw) : result.rows;
+  // Only the columns the pages use leave the gateway (issue #6: minimal data).
+  const cols = (def.columnsFor && def.columnsFor(raw)) || def.columns;
+  if (cols) rows = rows.map((r) => Object.fromEntries(cols.map((c) => [c, r[c] === undefined ? null : r[c]])));
   return { rows, truncated: !!result.truncated };
 }
 

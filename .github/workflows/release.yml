@@ -1,7 +1,7 @@
 name: Release
 # Builds dist/opendental.mcpb, dist/opendental.plugin, the Windows gateway zip, the Linux gateway
 # tar.gz and SHA256SUMS, and publishes them on GitHub. Regular releases also publish the gateway
-# image ghcr.io/mullet156/opendental-gateway (:<version> and :latest).
+# image ghcr.io/mullet156/opendental-claude (:<version> and :latest).
 #   From main (or a v* tag): a release named after the version in package.json.
 #   From any other branch, or with "test build" ticked: a pre-release named
 #   v<version>-test.<run number>, so a pull request can be tried before it's merged.
@@ -66,7 +66,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          IMAGE=ghcr.io/mullet156/opendental-gateway
+          IMAGE=ghcr.io/mullet156/opendental-claude
           VERSION="${TAG#v}"
           echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
           docker build -t "$IMAGE:$VERSION" -t "$IMAGE:latest" .

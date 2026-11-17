@@ -104,13 +104,18 @@ test("wrong keys: after 10 from one address, that address waits 15 minutes; /hea
   assert.deepEqual(await good.request("GET", "/providers"), [{ ProvNum: 1 }]);
 });
 
-test("X-Forwarded-For is trusted only from the listed proxy addresses", async (t) => {
-  // Trusted (loopback, like Tailscale on the same box): each visitor is counted separately.
+test("the visitor-address headers (X-Forwarded-For, CF-Connecting-IP) are trusted only from the listed proxies", async (t) => {
+  // Trusted (loopback, like a Cloudflare tunnel on the same box): each visitor is counted separately.
   const g = await gateway(t, { trustProxy: ["127.0.0.1", "::1"] });
   const hit = (ip) => fetch(`${g.url}/v1/od/providers`, { headers: { Authorization: "Bearer " + "w".repeat(30), "X-Forwarded-For": ip } }).then((r) => r.status);
   for (let i = 0; i < 10; i++) assert.equal(await hit("100.64.0.1"), 401);
   assert.equal(await hit("100.64.0.1"), 429);
   assert.equal(await hit("100.64.0.2"), 401, "another visitor isn't blocked");
+  // Cloudflare Tunnel's header counts too.
+  const cf = (ip) => fetch(`${g.url}/v1/od/providers`, { headers: { Authorization: "Bearer " + "w".repeat(30), "CF-Connecting-IP": ip } }).then((r) => r.status);
+  for (let i = 0; i < 10; i++) assert.equal(await cf("203.0.113.7"), 401);
+  assert.equal(await cf("203.0.113.7"), 429);
+  assert.equal(await cf("203.0.113.8"), 401);
   // Not trusted from elsewhere: the header is ignored, so all requests count as the real peer.
   const h = await gateway(t, { trustProxy: ["10.9.9.9"] });
   const hit2 = (ip) => fetch(`${h.url}/v1/od/providers`, { headers: { Authorization: "Bearer " + "w".repeat(30), "X-Forwarded-For": ip } }).then((r) => r.status);

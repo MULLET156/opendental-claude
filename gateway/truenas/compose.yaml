@@ -1,12 +1,13 @@
-# TrueNAS SCALE: Apps -> Discover Apps -> (⋮) Install via YAML, paste this, and change
-# the folder on the "volumes" line to the dataset you made for the gateway.
-# See docs/truenas.md.
+# TrueNAS SCALE: Apps -> Discover Apps -> (⋮) Install via YAML, paste this, then:
+#   - change the folder on the "volumes" line to the dataset you made for the gateway;
+#   - paste your Cloudflare tunnel token after TUNNEL_TOKEN (step 4 of docs/truenas.md).
+# The token stays in TrueNAS. Never put it in GitHub, email or chat.
 services:
   opendental-gateway:
     image: ghcr.io/mullet156/opendental-claude:latest
     restart: unless-stopped
     # Host network: the gateway listens on 127.0.0.1:8787 of the NAS, where only the
-    # Tailscale app (also on the host network) reaches it. Nothing else on the office
+    # Cloudflare tunnel (also on the host network) reaches it. Nothing else on the office
     # network can.
     network_mode: host
     user: "568:568" # TrueNAS's "apps" user; it must own the dataset below
@@ -16,3 +17,12 @@ services:
       UPDATE_HOUR: "3" # checks GitHub for a new release at 3 am
     volumes:
       - /mnt/POOL/apps/opendental-gateway:/config
+
+  cloudflared:
+    # Cloudflare's tunnel app. It connects out to Cloudflare, so nothing opens on the router.
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    network_mode: host
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: "paste-your-tunnel-token-here"

@@ -127,7 +127,12 @@ function createGateway({ config, od, version = "dev", fake = false, stage, now =
   function clientIp(req) {
     const peer = String(req.socket.remoteAddress || "").replace(/^::ffff:/, "");
     const trusted = Array.isArray(config.trustProxy) ? config.trustProxy.includes(peer) : config.trustProxy;
-    if (trusted && req.headers["x-forwarded-for"]) return String(req.headers["x-forwarded-for"]).split(",")[0].trim();
+    if (trusted) {
+      // Cloudflare Tunnel sends the visitor's address in CF-Connecting-IP; most proxies use X-Forwarded-For.
+      const cf = String(req.headers["cf-connecting-ip"] || "").trim();
+      if (cf) return cf;
+      if (req.headers["x-forwarded-for"]) return String(req.headers["x-forwarded-for"]).split(",")[0].trim();
+    }
     return peer;
   }
 

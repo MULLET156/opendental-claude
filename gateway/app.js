@@ -125,8 +125,30 @@ function createGateway({ config, od, version = "dev", fake = false, stage, now =
   }
 
   function clientIp(req) {
-    if (config.trustProxy && req.headers["x-forwarded-for"]) return String(req.headers["x-forwarded-for"]).split(",")[0].trim();
-    return req.socket.remoteAddress;
+    const peer = String(req.socket.remoteAddress || "").replace(/^::ffff:/, "");
+    const trusted = Array.isArray(config.trustProxy) ? config.trustProxy.includes(peer) : config.trustProxy;
+    if (trusted && req.headers["x-forwarded-for"]) return String(req.headers["x-forwarded-for"]).split(",")[0].trim();
+    return peer;
+  }
+
+  // Wrong keys: after 10 from one address in 10 minutes, that address waits 15 minutes.
+  // (Matters once the gateway is reachable through a tunnel.)
+  const failures = new Map(); // ip -> { count, first, blockedUntil }
+  const FAIL_LIMIT = 10;
+  const FAIL_WINDOW = 10 * 60000;
+  const BLOCK_FOR = 15 * 60000;
+  function checkBlocked(ip) {
+    const f = failures.get(ip);
+    if (f && f.blockedUntil > now()) throw new HttpError(429, "rate_limited", "Too many wrong app keys from this address. Try again later.");
+  }
+  function noteFailure(ip) {
+    const t = now();
+    let f = failures.get(ip);
+    if (!f || t - f.first > FAIL_WINDOW) f = { count: 0, first: t, blockedUntil: 0 };
+    f.count++;
+    if (f.count >= FAIL_LIMIT) f.blockedUntil = t + BLOCK_FOR;
+    failures.set(ip, f);
+    if (failures.size > 10000) for (const [k, v] of failures) if (v.blockedUntil < t && t - v.first > FAIL_WINDOW) failures.delete(k);
   }
 
   function corsHeaders(req) {
@@ -287,8 +309,15 @@ function createGateway({ config, od, version = "dev", fake = false, stage, now =
     const ctx = { target: url.pathname.replace(/\/\d+(?=\/|$)/g, "/{id}"), rows: undefined };
     let app = null;
     let status = 500;
+    const ip = clientIp(req);
     try {
-      app = authenticate(req);
+      checkBlocked(ip);
+      try {
+        app = authenticate(req);
+      } catch (e) {
+        noteFailure(ip);
+        throw e;
+      }
       rateLimit(app);
       const body = await readBody(req, app);
       const out = await route(req, app, url, body, ctx);

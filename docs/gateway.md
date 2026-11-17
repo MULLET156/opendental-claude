@@ -57,7 +57,7 @@ node gateway/server.js
 
 - **Windows (typical Open Dental server):** use Task Scheduler ("At startup", run `node.exe` with arguments `gateway\server.js C:\path\to\gateway.config.json`, start in the repo folder, run whether user is logged on or not), or a service wrapper such as NSSM.
 - **Linux:** a systemd unit with `ExecStart=/usr/bin/node /opt/opendental-claude/gateway/server.js /etc/odgw/gateway.config.json` and `Restart=always`.
-- **Docker:** see the `Dockerfile` in the repo root; mount your config and pass the `OD_*` variables.
+- **TrueNAS SCALE / Docker:** see [truenas.md](truenas.md). The image `ghcr.io/mullet156/opendental-gateway` updates itself from GitHub releases.
 
 ## Lab tracker sync
 

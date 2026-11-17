@@ -1,6 +1,7 @@
 name: Release
-# Builds dist/opendental.mcpb, dist/opendental.plugin and dist/opendental-gateway-windows-<version>.zip
-# and publishes them on GitHub.
+# Builds dist/opendental.mcpb, dist/opendental.plugin, the Windows gateway zip, the Linux gateway
+# tar.gz and SHA256SUMS, and publishes them on GitHub. Regular releases also publish the gateway
+# image ghcr.io/mullet156/opendental-gateway (:<version> and :latest).
 #   From main (or a v* tag): a release named after the version in package.json.
 #   From any other branch, or with "test build" ticked: a pre-release named
 #   v<version>-test.<run number>, so a pull request can be tried before it's merged.
@@ -17,6 +18,7 @@ on:
     tags: ["v*"]
 permissions:
   contents: write
+  packages: write
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -49,7 +51,7 @@ jobs:
           TAG: ${{ steps.tag.outputs.tag }}
           TEST: ${{ steps.tag.outputs.test }}
         run: |
-          FILES="dist/opendental.mcpb dist/opendental.plugin $(ls dist/opendental-gateway-windows-*.zip)"
+          FILES="dist/opendental.mcpb dist/opendental.plugin $(ls dist/opendental-gateway-windows-*.zip) $(ls dist/opendental-gateway-*.tar.gz) dist/SHA256SUMS"
           if [ "$TEST" = "true" ]; then
             printf 'Test build from branch `%s` (commit %s), for trying changes before they are merged. Not a regular release.\n\nSee CHANGELOG.md on that branch for what changed.\n' "$GITHUB_REF_NAME" "${GITHUB_SHA:0:7}" > notes.md
             gh release create "$TAG" $FILES --target "$GITHUB_SHA" --title "$TAG (test build)" --notes-file notes.md --prerelease --latest=false
@@ -58,3 +60,15 @@ jobs:
           else
             gh release create "$TAG" $FILES --target "$GITHUB_SHA" --title "$TAG" --notes-file CHANGELOG.md
           fi
+      - name: Publish the gateway image (regular releases only)
+        if: steps.tag.outputs.test != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          IMAGE=ghcr.io/mullet156/opendental-gateway
+          VERSION="${TAG#v}"
+          echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker build -t "$IMAGE:$VERSION" -t "$IMAGE:latest" .
+          docker push "$IMAGE:$VERSION"
+          docker push "$IMAGE:latest"

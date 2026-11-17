@@ -64,7 +64,9 @@ function validateConfig(raw, { requireApps = true } = {}) {
   const cfg = {
     listen: { host: "127.0.0.1", port: 8787, ...(raw.listen || {}) },
     tls: raw.tls || null,
-    trustProxy: !!raw.trustProxy,
+    // true = trust X-Forwarded-For from anyone (only behind a proxy you control);
+    // a list of addresses = trust it only from those (e.g. Tailscale on this box: ["127.0.0.1", "::1"]).
+    trustProxy: Array.isArray(raw.trustProxy) ? raw.trustProxy.map(String) : !!raw.trustProxy,
     auditLogDir: raw.auditLogDir === undefined ? "logs" : raw.auditLogDir,
     maxRows: Number(raw.maxRows || 1000),
     maxBodyBytes: Number(raw.maxBodyBytes || 1024 * 1024),

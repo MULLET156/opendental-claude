@@ -157,6 +157,19 @@ test("the existing chart tools work unchanged in gateway mode (plan, priorities,
   assert.ok(notes.some((r) => r.PatNum === pat && r.ProcCode === "~GRP~"));
 });
 
+test("Treatment Notes box through the gateway: Voice can add and replace; read-only keys can't write", async () => {
+  const tools = Object.fromEntries(buildClinicalTools(client("voice"), { allowChartChanges: true }).map((t) => [t.name, t]));
+  const pat = 1007;
+  assert.equal((await tools.od_get_treatment_note.run({ pat_num: pat })).results.treatment_note, "");
+  let r = await tools.od_add_to_treatment_note.run({ pat_num: pat, text: "Fake: wants to wait until January." });
+  assert.equal(r.results.treatment_note, "Fake: wants to wait until January.");
+  r = await tools.od_replace_treatment_note.run({ pat_num: pat, current_text: r.results.treatment_note, new_text: "Fake: January." });
+  assert.equal(r.results.treatment_note, "Fake: January.");
+  await assert.rejects(tools.od_get_treatment_note.run({ pat_num: 9 }), /no patient note record/);
+  const daysheet = Object.fromEntries(buildClinicalTools(client("daysheet"), { allowChartChanges: true }).map((t) => [t.name, t]));
+  await assert.rejects(daysheet.od_add_to_treatment_note.run({ pat_num: pat, text: "x" }), (e) => e.status === 403);
+});
+
 // ------------------------------------------------------------------ the new reports
 
 test("every new report returns exactly its declared columns from the demo gateway", async () => {

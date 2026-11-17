@@ -22,6 +22,11 @@ function startFakeOD({ port = 0, onRequest } = {}) {
       { TreatPlanAttachNum: 60, TreatPlanNum: 9, ProcNum: 103, Priority: 501 },
       { TreatPlanAttachNum: 61, TreatPlanNum: 9, ProcNum: 105, Priority: 0 },
     ],
+    patientnotes: {
+      1: { PatNum: 1, Medical: "", Service: "", Treatment: "Prefers morning appointments.", ICEName: "", ICEPhone: "", SecDateTEdit: "2026-11-01 09:00:00" },
+      2: { PatNum: 2, Treatment: "" },
+      5: { PatNum: 5, Medical: "" }, // an older Open Dental without the Treatment field
+    },
     toothinitials: [
       { ToothInitialNum: 301, PatNum: 1, ToothNum: "1", InitialType: "Missing" },
       { ToothInitialNum: 302, PatNum: 1, ToothNum: "4", InitialType: "Primary" },
@@ -200,6 +205,17 @@ function startFakeOD({ port = 0, onRequest } = {}) {
       if ((m = p.match(/^\/appointments\/(\d+)$/)) && req.method === "GET") {
         const ap = state.appts[m[1]];
         return ap ? json(200, ap) : json(404, { message: "Appointment not found" });
+      }
+      // ---- patient notes (Treatment Notes box)
+      if ((m = p.match(/^\/patientnotes\/(\d+)$/))) {
+        const pn = state.patientnotes[m[1]];
+        if (!pn) return json(404, { message: "PatientNote not found" });
+        if (req.method === "GET") return json(200, pn);
+        if (req.method === "PUT") {
+          if (!state.ignoreNotePut) for (const k of ["Treatment", "Medical", "Service", "ICEName", "ICEPhone"]) if (rec.body[k] !== undefined) pn[k] = rec.body[k];
+          pn.SecDateTEdit = "2026-11-17 10:00:00";
+          return json(200, pn);
+        }
       }
       // ---- tooth chart
       if (p === "/toothinitials" && req.method === "GET") return json(200, state.toothinitials.filter((x) => String(x.PatNum) === rec.query.PatNum));

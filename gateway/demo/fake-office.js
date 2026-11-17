@@ -169,6 +169,7 @@ function buildOffice({ today = localToday(), seed = 7 } = {}) {
     treatplan: [],
     treatplanattach: [],
     toothinitial: [],
+    patientnote: {}, // PatNum -> { Treatment, ... }; empty unless written
     commlog: [],
   };
 

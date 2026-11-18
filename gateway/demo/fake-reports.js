@@ -271,6 +271,20 @@ const FAKES = {
     return [...by.values()].sort(cmp("ProcDate"));
   },
 
+  production_by_month(o, ix, p) {
+    const by = new Map();
+    for (const pl of o.procedurelog) {
+      if (pl.ProcStatus !== 2 || pl.ProcDate < p.from || pl.ProcDate > p.to || (p.provider && pl.ProvNum !== p.provider)) continue;
+      const month = pl.ProcDate.slice(0, 7);
+      const key = `${month}|${pl.ProvNum}`;
+      const r = by.get(key) || { Month: month, ProvNum: pl.ProvNum, GrossProduction: 0, ProcCount: 0 };
+      r.GrossProduction = Math.round((r.GrossProduction + fee(pl)) * 100) / 100;
+      r.ProcCount++;
+      by.set(key, r);
+    }
+    return [...by.values()].sort(cmp("Month", "ProvNum"));
+  },
+
   scheduled_production(o, ix, p) {
     const by = new Map();
     for (const a of o.appointment) {
@@ -330,8 +344,27 @@ const FAKES = {
  * Rows for one report from the fake office, shaped like the real SQL's output.
  * `params` are the parsed plain values from parseReportParams().raw.
  */
+// Practice Numbers reports with no fake data on purpose (Ryan, 2026-11-17, issue #14): they are
+// built and checked against Open Dental's demo database through the design-stage gateway.
+const DEMO_DATABASE_ONLY = [
+  "production_by_code",
+  "procedure_counts",
+  "adjustments_by_provider",
+  "writeoffs_by_provider",
+  "patient_payments_by_provider",
+  "insurance_payments_by_provider",
+  "collections_by_month",
+  "ar_aging",
+  "ar_aging_totals",
+  "outstanding_claims",
+  "unsent_claims",
+];
+
 function fakeReportRows(office, name, params, { limit } = {}) {
   const fn = Object.prototype.hasOwnProperty.call(FAKES, name) ? FAKES[name] : null;
+  if (!fn && DEMO_DATABASE_ONLY.includes(name)) {
+    throw new ODError(`The fake demo has no data for report "${name}": it comes from Open Dental's demo database. Use the design-stage gateway (docs/truenas.md) for it.`, { code: "not_implemented" });
+  }
   if (!fn) {
     throw new ODError(`The demo gateway has no fake data for report "${name}" yet. Ask the Connector agent (open a "Report request: ${name}" issue).`, { code: "not_implemented" });
   }
@@ -341,4 +374,4 @@ function fakeReportRows(office, name, params, { limit } = {}) {
   return { rows: JSON.parse(JSON.stringify(rows)), truncated };
 }
 
-module.exports = { fakeReportRows, FAKE_REPORTS: Object.keys(FAKES) };
+module.exports = { fakeReportRows, FAKE_REPORTS: Object.keys(FAKES), DEMO_DATABASE_ONLY };

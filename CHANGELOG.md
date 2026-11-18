@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.13.0 — 2026-11-17
+
+- **Practice Numbers reports come from Open Dental's demo database, not fake data** (issue #14, Ryan's choice). The module builds against the design-stage gateway on TrueNAS; the fake demo answers those reports with a 501 that says so.
+- New reports for trend charts: **`production_by_month`** (Month, ProvNum, GrossProduction, ProcCount) and **`collections_by_month`** (Month, PatientPayments, InsurancePayments, TotalCollections). Months are `yyyy-MM`.
+- Every Practice Numbers report now declares its columns, so the rows are exactly those (no change to what they returned).
+- The `numbers` key runs exactly the 16 Practice Numbers reports and changes nothing.
+- All 16 were run read-only (counts only) against Open Dental 26.2.40 to confirm the SQL.
+
 ## 0.12.0 — 2026-11-16
 
 - **Reports return only what the pages show** (issue #6, item 5; SITE-OUTLINE.md). Removed columns, for module agents:

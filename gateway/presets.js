@@ -22,14 +22,14 @@ const PRESETS = {
     reports: ["unscheduled_treatment", "no_future_appointment", "insurance_remaining", "xray_history", "recall_overdue", "patient_treatment_plan", "patient_recall"],
   },
   voice: {
-    description: "Voice Charting: read the chart; plan procedures, set priorities and status, add notes and group notes (never signs).",
+    description: "Voice Charting: read the chart; plan procedures, set priorities and status, add notes and group notes, write the Treatment Notes box (never signs).",
     allow: [
       {
         methods: ["GET"],
-        paths: [...READ_PATIENT, "/procedurelogs", "/procedurelogs/*", "/procedurecodes", "/definitions", "/treatplans", "/treatplanattaches", "/procnotes", "/chartmodules/**", "/providers", "/toothinitials", "/appointments", "/appointments/*"],
+        paths: [...READ_PATIENT, "/procedurelogs", "/procedurelogs/*", "/procedurecodes", "/definitions", "/treatplans", "/treatplanattaches", "/procnotes", "/chartmodules/**", "/providers", "/toothinitials", "/patientnotes/*", "/appointments", "/appointments/*"],
       },
       { methods: ["POST"], paths: ["/procedurelogs", "/procedurelogs/GroupNote", "/procnotes", "/treatplans", "/treatplanattaches", "/toothinitials"] },
-      { methods: ["PUT"], paths: ["/procedurelogs/*", "/treatplans/*", "/treatplanattaches/*"] },
+      { methods: ["PUT"], paths: ["/procedurelogs/*", "/treatplans/*", "/treatplanattaches/*", "/patientnotes/*"] },
       { methods: ["DELETE"], paths: ["/procedurelogs/*", "/toothinitials/*"] },
     ],
     reports: ["patient_treatment_plan", "unsigned_notes", "daysheet"],

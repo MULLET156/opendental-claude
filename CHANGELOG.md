@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.14.0 — 2026-11-18
+
+- **Write to the Chart's Treatment Notes box** (Open Dental 25.2.14 or newer; the patient note's `Treatment` field). Needs "Allow chart changes".
+  - `od_get_treatment_note`: read it.
+  - `od_add_to_treatment_note`: add a line at the end, keeping everything already there (optionally starting with today's date).
+  - `od_replace_treatment_note`: rewrite or clear it. Claude must pass the text it read; if the box changed in between, nothing is saved. The old text comes back so it can be put back.
+  - Every write is read back from Open Dental; a write that didn't stick is reported as not made.
+- The Voice Charting key (`voice` preset) may read and write patient notes (`GET`/`PUT /patientnotes/*`). The demo gateway has an empty Treatment Notes box for each fake patient.
+
 ## 0.13.0 — 2026-11-17
 
 - **Practice Numbers reports come from Open Dental's demo database, not fake data** (issue #14, Ryan's choice). The module builds against the design-stage gateway on TrueNAS; the fake demo answers those reports with a 501 that says so.

@@ -1,6 +1,6 @@
 ---
 name: od-clinical
-description: Use when the user wants to read or change the clinical chart in Open Dental — "write today's note for Jane Smith", "add the group note for this visit", "what did we do last visit", "add an addendum", "treatment plan a crown on 30", "plan MOD composite on 3 and 14", "put the implant workup in phase 2", "complete the crown on 30", "chart an existing PFM on 19 from another dentist", "chart a fracture on 14", "referred the 3rd molars to the oral surgeon", "mark 1, 16, 17 and 32 missing", "K has exfoliated, change it to permanent", "check her meds and allergies". Covers progress notes, group notes, addenda, treatment planning, procedure status, and the tooth chart (missing, hidden, primary/permanent).
+description: Use when the user wants to read or change the clinical chart in Open Dental — "write today's note for Jane Smith", "add the group note for this visit", "what did we do last visit", "add an addendum", "treatment plan a crown on 30", "plan MOD composite on 3 and 14", "put the implant workup in phase 2", "complete the crown on 30", "chart an existing PFM on 19 from another dentist", "chart a fracture on 14", "referred the 3rd molars to the oral surgeon", "mark 1, 16, 17 and 32 missing", "K has exfoliated, change it to permanent", "check her meds and allergies", "add to her treatment notes that she wants to wait until January". Covers progress notes, group notes, addenda, the Treatment Notes box, treatment planning, procedure status, and the tooth chart (missing, hidden, primary/permanent).
 ---
 
 # Open Dental chart notes and treatment planning
@@ -62,6 +62,15 @@ Do not schedule or estimate insurance here; those happen in Open Dental (or with
   - `referred`: treatment referred out (e.g. third molars to the oral surgeon).
   - `condition`: findings such as fractures, caries, abfractions, using the office's condition codes (find them with `od_lookup_procedure_code`, e.g. "fracture").
 - **Change a status:** `od_set_procedure_status` works on planned, existing, referred and condition procedures. It never changes completed procedures (billing history); if one is wrong, tell the user to correct it in Open Dental.
+
+## Treatment Notes box
+
+The **Treatment Notes** box in the Chart (Open Dental 25.2.14 or newer) holds running notes about the patient's treatment, separate from signed progress notes.
+
+- Read it with `od_get_treatment_note`.
+- **Add a line** with `od_add_to_treatment_note` (the usual choice; everything already there is kept). `date_stamp: true` starts the line with today's date.
+- **Rewrite or clear it** with `od_replace_treatment_note` only when the user asks to correct, tidy or clear it: read it first, show the old and new text, get a yes, and pass the text you read as `current_text`. If someone changed the box in between, nothing is saved; read it again. The old text comes back so you can put it back if asked.
+- Clinical findings for today's visit still go in the group note, not here.
 
 ## Tooth chart (missing, hidden, primary/permanent)
 

@@ -122,7 +122,7 @@ Errors are `ODError`s with `status` (401 bad key, 403 not allowed for this modul
 | daysheet | read appointments, patients, providers, operatories, procedures, lab cases | daysheet, xray_history, unscheduled_treatment, insurance_remaining, lab_cases_open, patient_treatment_plan, operatories |
 | finder | read patients, appointments, providers, carriers | unscheduled_treatment, no_future_appointment, insurance_remaining, xray_history, recall_overdue, patient_treatment_plan, patient_recall |
 | voice | read the chart; plan procedures, priorities, status, notes, group notes, treatment plans, tooth chart | patient_treatment_plan, unsigned_notes, daysheet |
-| numbers | providers | production, collections and A/R reports |
+| numbers | providers | the 16 Practice Numbers reports below (read only) |
 
 The real gateway uses the same lists: `node gateway/cli.js new-key daysheet` prints a config entry with them.
 
@@ -138,6 +138,31 @@ Run with `POST /v1/reports/<name>` and a JSON body `{"params": {...}}` (or `GET`
 | `xray_history` | `patients` or `date` (one is required), `limit` | PatNum, LName, FName, Category (BWX, FMX, PANO), LastDate, Limit, NextCovered, CoveredNow, AsOf |
 | `insurance_remaining` | `patients`, `carrier`, `min_remaining`, `limit` | PatNum, LName, FName, Carrier, Remaining, IsEstimate (always true), AsOf |
 | `unsigned_notes` | `days` (default 90) or `from`/`to`, `provider`, `count_only`, `limit` | ProcNum, PatNum, LName, FName, ProcDate, ProcCode, Provider (or one row `{UnsignedNotes}` with count_only) |
+
+### Practice Numbers reports
+
+These come from **Open Dental's demo database** through the design-stage gateway on TrueNAS ([truenas.md](truenas.md)), not from fake data. The fake demo gateway answers only `production_by_provider`, `production_by_day`, `production_by_month`, `scheduled_production` and `new_patients`, and says so (501) for the rest. All take `from` and `to` (`yyyy-MM-dd`) unless noted.
+
+| Report | Other parameters | Each row |
+|---|---|---|
+| `production_by_provider` | `clinic` | ProvNum, GrossProduction, ProcCount |
+| `production_by_day` | `provider`, `clinic` | ProcDate, GrossProduction, ProcCount |
+| `production_by_month` | `provider`, `clinic` | Month (`yyyy-MM`), ProvNum, GrossProduction, ProcCount |
+| `production_by_code` | `limit` (25) | ProcCode, Descript, Qty, Production |
+| `procedure_counts` | `codes` (required) | ProcDate, ProcCode, Descript, Qty |
+| `adjustments_by_provider` | | ProvNum, Adjustments, AdjCount |
+| `writeoffs_by_provider` | `basis` (`procedure` or `payment`) | ProvNum, WriteOffs |
+| `patient_payments_by_provider` | | ProvNum, PatientPayments, SplitCount |
+| `insurance_payments_by_provider` | | ProvNum, InsurancePayments |
+| `collections_by_month` | | Month, PatientPayments, InsurancePayments, TotalCollections |
+| `scheduled_production` | | AptDate, ProvNum, Appointments, ScheduledProduction |
+| `new_patients` | | NewPatients |
+| `ar_aging_totals` | none (no dates) | Bal_0_30, Bal_31_60, Bal_61_90, BalOver90, InsEst, BalTotal, CreditBalances |
+| `ar_aging` | no dates; `guarantor`, `min_balance`, `limit` | PatNum, LName, FName, the four buckets, InsEst, BalTotal, PatPortion |
+| `outstanding_claims` | no dates; `min_days`, `limit` | ClaimNum, PatNum, LName, FName, CarrierName, DateService, DateSent, DaysOut, ClaimFee, InsPayEst, ClaimType |
+| `unsent_claims` | none | ClaimNum, PatNum, LName, FName, CarrierName, DateService, ClaimStatus, ClaimFee, ClaimType |
+
+Net production = gross production + adjustments − write-offs. `ar_aging`, `outstanding_claims` and `unsent_claims` name patients: show them only after a tap and never on tiles.
 
 Each report returns only the columns its planned pages show (SITE-OUTLINE.md), and never SSN, birthdate, address or phone. The Treatment Finder gets a phone number from the patient lookup, only after a tap.
 

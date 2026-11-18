@@ -17,7 +17,7 @@ const { REPORTS, runReport, parseReportParams, xrayRow, DEFAULT_HYGIENE_CODES } 
 const { buildClinicalTools } = require("../core/clinical-tools");
 const { startDemoGateway, TEST_KEYS } = require("../gateway/demo/demo-gateway");
 const { buildOffice } = require("../gateway/demo/fake-office");
-const { fakeReportRows, FAKE_REPORTS } = require("../gateway/demo/fake-reports");
+const { fakeReportRows, FAKE_REPORTS, DEMO_DATABASE_ONLY } = require("../gateway/demo/fake-reports");
 const { PRESETS } = require("../gateway/presets");
 const { validateConfig, hashKey } = require("../gateway/config");
 const { createGateway } = require("../gateway/app");
@@ -176,8 +176,9 @@ test("every new report returns exactly its declared columns from the demo gatewa
   }
 });
 
-test("every report with declared columns has fake data, and every fake report exists", () => {
-  for (const [name, def] of Object.entries(REPORTS)) if (def.columns) assert.ok(FAKE_REPORTS.includes(name), name);
+test("every report with declared columns has fake data or comes from the demo database, and every fake report exists", () => {
+  for (const [name, def] of Object.entries(REPORTS)) if (def.columns) assert.ok(FAKE_REPORTS.includes(name) || DEMO_DATABASE_ONLY.includes(name), name);
+  for (const name of DEMO_DATABASE_ONLY) assert.ok(REPORTS[name] && !FAKE_REPORTS.includes(name), name);
   for (const name of FAKE_REPORTS) assert.ok(REPORTS[name], name);
 });
 
@@ -432,4 +433,23 @@ test("sync-core: copies core/ into vendor/opendental-core with VERSION and CHECK
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("Practice Numbers (issue #14): its key runs exactly its reports, writes nothing, and the fake demo points to the demo database", async () => {
+  const p = PRESETS.numbers;
+  assert.deepEqual([...p.reports].sort(), [
+    "adjustments_by_provider", "ar_aging", "ar_aging_totals", "collections_by_month", "insurance_payments_by_provider",
+    "new_patients", "outstanding_claims", "patient_payments_by_provider", "procedure_counts", "production_by_code",
+    "production_by_day", "production_by_month", "production_by_provider", "scheduled_production", "unsent_claims", "writeoffs_by_provider",
+  ]);
+  assert.ok(p.allow.every((a) => a.methods.every((m) => m === "GET")));
+  for (const name of p.reports) assert.ok(REPORTS[name].columns, `${name} declares its columns`);
+
+  const od = client("numbers");
+  const months = (await od.runReport("production_by_month", { from: "2026-01-01", to: "2026-12-31" })).rows;
+  assert.ok(months.length);
+  assert.deepEqual(Object.keys(months[0]), ["Month", "ProvNum", "GrossProduction", "ProcCount"]);
+  assert.match(months[0].Month, /^\d{4}-\d{2}$/);
+  await assert.rejects(od.runReport("ar_aging_totals", {}), (e) => e.status === 501 && /demo database/.test(e.message));
+  await assert.rejects(od.request("POST", "/commlogs", { body: {} }), (e) => e.status === 403);
 });

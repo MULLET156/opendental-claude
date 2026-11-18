@@ -207,6 +207,7 @@ function xrayRow(r) {
 const REPORTS = {
   production_by_provider: {
     category: "production",
+    columns: ["ProvNum", "GrossProduction", "ProcCount"],
     description: "Gross production (completed procedures) per provider for a date range.",
     params: { from: { type: "date", required: true }, to: { type: "date", required: true }, clinic: { type: "id" } },
     sql: (p) => `SELECT pl.ProvNum, ROUND(SUM(${PROD}), 2) AS GrossProduction, COUNT(*) AS ProcCount
@@ -217,6 +218,7 @@ GROUP BY pl.ProvNum ORDER BY GrossProduction DESC`,
 
   production_by_day: {
     category: "production",
+    columns: ["ProcDate", "GrossProduction", "ProcCount"],
     description: "Gross production per day for a date range (optionally one provider).",
     params: { from: { type: "date", required: true }, to: { type: "date", required: true }, provider: { type: "id" }, clinic: { type: "id" } },
     sql: (p) => `SELECT pl.ProcDate, ROUND(SUM(${PROD}), 2) AS GrossProduction, COUNT(*) AS ProcCount
@@ -227,6 +229,7 @@ GROUP BY pl.ProcDate ORDER BY pl.ProcDate`,
 
   production_by_code: {
     category: "production",
+    columns: ["ProcCode", "Descript", "Qty", "Production"],
     description: "What drove production: completed procedures by code, highest first.",
     params: { from: { type: "date", required: true }, to: { type: "date", required: true }, limit: { type: "int", default: 25 } },
     sql: (p) => `SELECT pc.ProcCode, pc.Descript, COUNT(*) AS Qty, ROUND(SUM(${PROD}), 2) AS Production
@@ -235,8 +238,20 @@ WHERE pl.ProcStatus = 2 AND pl.ProcDate BETWEEN ${p.from} AND ${p.to}
 GROUP BY pc.ProcCode, pc.Descript ORDER BY Production DESC LIMIT ${Math.min(Math.max(Number(p.limit), 1), 500)}`,
   },
 
+  production_by_month: {
+    category: "production",
+    description: "Gross production per month (yyyy-MM) and provider, for trend charts. Covers whole days from 'from' to 'to'.",
+    columns: ["Month", "ProvNum", "GrossProduction", "ProcCount"],
+    params: { from: { type: "date", required: true }, to: { type: "date", required: true }, provider: { type: "id" }, clinic: { type: "id" } },
+    sql: (p) => `SELECT DATE_FORMAT(pl.ProcDate, '%Y-%m') AS Month, pl.ProvNum, ROUND(SUM(${PROD}), 2) AS GrossProduction, COUNT(*) AS ProcCount
+FROM procedurelog pl
+WHERE pl.ProcStatus = 2 AND pl.ProcDate BETWEEN ${p.from} AND ${p.to}${and(p.provider && `pl.ProvNum = ${p.provider}`)}${and(p.clinic && `pl.ClinicNum = ${p.clinic}`)}
+GROUP BY DATE_FORMAT(pl.ProcDate, '%Y-%m'), pl.ProvNum ORDER BY Month, pl.ProvNum`,
+  },
+
   procedure_counts: {
     category: "production",
+    columns: ["ProcDate", "ProcCode", "Descript", "Qty"],
     description:
       "Count of completed procedures for specific codes in a date range, by day. Useful for supply usage (e.g. crowns milled per week).",
     params: { from: { type: "date", required: true }, to: { type: "date", required: true }, codes: { type: "codes", required: true } },
@@ -248,6 +263,7 @@ GROUP BY pl.ProcDate, pc.ProcCode, pc.Descript ORDER BY pl.ProcDate, pc.ProcCode
 
   adjustments_by_provider: {
     category: "production",
+    columns: ["ProvNum", "Adjustments", "AdjCount"],
     description: "Adjustments (discounts are negative) per provider for a date range.",
     params: { from: { type: "date", required: true }, to: { type: "date", required: true } },
     sql: (p) => `SELECT a.ProvNum, ROUND(SUM(a.AdjAmt), 2) AS Adjustments, COUNT(*) AS AdjCount
@@ -256,6 +272,7 @@ FROM adjustment a WHERE a.AdjDate BETWEEN ${p.from} AND ${p.to} GROUP BY a.ProvN
 
   writeoffs_by_provider: {
     category: "production",
+    columns: ["ProvNum", "WriteOffs"],
     description: "Insurance write-offs per provider. basis=procedure dates by procedure date (default), payment by payment date.",
     params: {
       from: { type: "date", required: true },
@@ -270,6 +287,7 @@ GROUP BY cp.ProvNum`,
 
   patient_payments_by_provider: {
     category: "collections",
+    columns: ["ProvNum", "PatientPayments", "SplitCount"],
     description: "Patient payments (pay splits) per provider by payment date.",
     params: { from: { type: "date", required: true }, to: { type: "date", required: true } },
     sql: (p) => `SELECT ps.ProvNum, ROUND(SUM(ps.SplitAmt), 2) AS PatientPayments, COUNT(*) AS SplitCount
@@ -278,14 +296,29 @@ FROM paysplit ps WHERE ps.DatePay BETWEEN ${p.from} AND ${p.to} GROUP BY ps.Prov
 
   insurance_payments_by_provider: {
     category: "collections",
+    columns: ["ProvNum", "InsurancePayments"],
     description: "Insurance payments per provider by payment date.",
     params: { from: { type: "date", required: true }, to: { type: "date", required: true } },
     sql: (p) => `SELECT cp.ProvNum, ROUND(SUM(cp.InsPayAmt), 2) AS InsurancePayments
 FROM claimproc cp WHERE cp.Status IN (1, 4, 7) AND cp.DateCP BETWEEN ${p.from} AND ${p.to} GROUP BY cp.ProvNum`,
   },
 
+  collections_by_month: {
+    category: "collections",
+    description: "Patient and insurance payments per month (yyyy-MM) by payment date, office-wide, for trend charts.",
+    columns: ["Month", "PatientPayments", "InsurancePayments", "TotalCollections"],
+    params: { from: { type: "date", required: true }, to: { type: "date", required: true } },
+    sql: (p) => `SELECT x.Month, ROUND(SUM(x.Pat), 2) AS PatientPayments, ROUND(SUM(x.Ins), 2) AS InsurancePayments, ROUND(SUM(x.Pat + x.Ins), 2) AS TotalCollections
+FROM (
+SELECT DATE_FORMAT(ps.DatePay, '%Y-%m') AS Month, ps.SplitAmt AS Pat, 0 AS Ins FROM paysplit ps WHERE ps.DatePay BETWEEN ${p.from} AND ${p.to}
+UNION ALL
+SELECT DATE_FORMAT(cp.DateCP, '%Y-%m') AS Month, 0 AS Pat, cp.InsPayAmt AS Ins FROM claimproc cp WHERE cp.Status IN (1, 4, 7) AND cp.DateCP BETWEEN ${p.from} AND ${p.to}
+) x GROUP BY x.Month ORDER BY x.Month`,
+  },
+
   scheduled_production: {
     category: "schedule",
+    columns: ["AptDate", "ProvNum", "Appointments", "ScheduledProduction"],
     description: "Scheduled production per day and provider (procedures attached to scheduled appointments).",
     params: { from: { type: "date", required: true }, to: { type: "date", required: true } },
     sql: (p) => `SELECT DATE(ap.AptDateTime) AS AptDate, ap.ProvNum, COUNT(DISTINCT ap.AptNum) AS Appointments,
@@ -297,6 +330,7 @@ GROUP BY DATE(ap.AptDateTime), ap.ProvNum ORDER BY AptDate, ap.ProvNum`,
 
   new_patients: {
     category: "production",
+    columns: ["NewPatients"],
     description: "Count of new patients (first visit) in a date range.",
     params: { from: { type: "date", required: true }, to: { type: "date", required: true } },
     sql: (p) => `SELECT COUNT(*) AS NewPatients FROM patient p
@@ -305,6 +339,7 @@ WHERE p.DateFirstVisit BETWEEN ${p.from} AND ${p.to} AND p.PatStatus IN (0, 2)`,
 
   ar_aging: {
     category: "billing",
+    columns: ["PatNum", "LName", "FName", "Bal_0_30", "Bal_31_60", "Bal_61_90", "BalOver90", "InsEst", "BalTotal", "PatPortion"],
     description: "A/R aging by guarantor (largest balances first), or one family with guarantor=PatNum. Uses Open Dental's stored aging.",
     params: { guarantor: { type: "id" }, min_balance: { type: "money" }, limit: { type: "int", default: 200 } },
     sql: (p) => `SELECT p.PatNum, p.LName, p.FName, p.Bal_0_30, p.Bal_31_60, p.Bal_61_90, p.BalOver90,
@@ -316,6 +351,7 @@ ORDER BY p.BalTotal DESC LIMIT ${Math.min(Math.max(Number(p.limit), 1), 5000)}`,
 
   ar_aging_totals: {
     category: "billing",
+    columns: ["Bal_0_30", "Bal_31_60", "Bal_61_90", "BalOver90", "InsEst", "BalTotal", "CreditBalances"],
     description: "Office-wide A/R aging bucket totals.",
     params: {},
     sql: () => `SELECT ROUND(SUM(p.Bal_0_30), 2) AS Bal_0_30, ROUND(SUM(p.Bal_31_60), 2) AS Bal_31_60,
@@ -327,6 +363,7 @@ FROM patient p WHERE p.Guarantor = p.PatNum AND p.PatStatus <> 4`,
 
   outstanding_claims: {
     category: "billing",
+    columns: ["ClaimNum", "PatNum", "LName", "FName", "CarrierName", "DateService", "DateSent", "DaysOut", "ClaimFee", "InsPayEst", "ClaimType"],
     description: "Insurance claims sent but not received, oldest first. min_days filters by days since sent.",
     params: { min_days: { type: "int", default: 0 }, limit: { type: "int", default: 300 } },
     sql: (p) => `SELECT c.ClaimNum, c.PatNum, p.LName, p.FName, ca.CarrierName, c.DateService, c.DateSent,
@@ -341,6 +378,7 @@ ORDER BY DaysOut DESC LIMIT ${Math.min(Math.max(Number(p.limit), 1), 5000)}`,
 
   unsent_claims: {
     category: "billing",
+    columns: ["ClaimNum", "PatNum", "LName", "FName", "CarrierName", "DateService", "ClaimStatus", "ClaimFee", "ClaimType"],
     description: "Claims unsent, waiting to send, or on hold.",
     params: {},
     sql: () => `SELECT c.ClaimNum, c.PatNum, p.LName, p.FName, ca.CarrierName, c.DateService, c.ClaimStatus, c.ClaimFee, c.ClaimType
